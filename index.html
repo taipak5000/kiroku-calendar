@@ -178,9 +178,10 @@
 
   .job-allowance-form { display:flex; flex-direction:column; gap:6px; }
   .job-allowance-rows { display:flex; flex-direction:column; gap:6px; }
-  .job-allowance-row { display:flex; align-items:center; gap:6px; }
+  .job-allowance-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
   .job-allowance-row input[type="text"] { flex:1; min-width:90px; }
-  .job-allowance-row input[type="number"] { width:88px; flex:none; }
+  .job-allowance-row input[type="number"] { width:80px; flex:none; }
+  .allowance-type-select { flex:none; width:98px; padding:8px 6px; font-size:12.5px; }
   .allowance-row-del { border:none; background:transparent; color:var(--danger); font-size:12px; cursor:pointer; flex-shrink:0; padding:4px 6px; }
   .allowance-add-btn { align-self:flex-start; border:1px dashed var(--border); background:transparent; color:var(--text-muted); border-radius:var(--radius-sm); padding:6px 12px; font-size:12.5px; cursor:pointer; }
   .allowance-add-btn:hover { border-color:var(--primary); color:var(--primary); }
@@ -396,7 +397,7 @@
           <div class="color-picker" id="job-color-picker"></div>
         </div>
         <div class="job-allowance-form">
-          <span class="hint-text">手当（交通費・食事補助など／月ごとの固定額・任意。その月に1回でも出勤があれば1回だけ加算されます）</span>
+          <span class="hint-text">手当（交通費・食事補助など・任意）。行ごとに「月1回」（その月に出勤が1回でもあれば1回だけ加算）か「出勤ごと」（シフトを1件登録するたびに加算）を選べます</span>
           <div id="job-allowance-rows" class="job-allowance-rows"></div>
           <button id="btn-add-allowance-row" class="allowance-add-btn" type="button">＋ 手当を追加</button>
         </div>
@@ -510,7 +511,7 @@ function computeShiftHours(startStr, endStr, breakMin) {
    IndexedDB データ層
    entries: { date(PK), medication, note, shifts[], hasMedia }
    media:   { id(PK,auto), date(index), type, mime, name, blob, createdAt }
-   jobs:    { id(PK,auto), name, hourlyWage, color, allowances[{name,amount}](月固定), createdAt }
+   jobs:    { id(PK,auto), name, hourlyWage, color, allowances[{name,amount,type:'monthly'|'perShift'}], createdAt }
    medications: { id(PK,auto), name, unit, dailyDose, stockQuantity, stockDate, createdAt }
    ========================================================= */
 const DB_NAME = 'kirokuCalendarDB';
@@ -833,25 +834,31 @@ async function renderCalendar() {
 }
 
 function renderSalarySummary(entries) {
-  const totals = new Map(); // jobId -> {jobId,name,color,hours,pay,allowance,total}
+  const totals = new Map(); // jobId -> {jobId,name,color,hours,pay,shiftCount,allowance,total}
   let grandHours = 0;
   for (const entry of entries) {
     if (!entry.shifts) continue;
     for (const s of entry.shifts) {
       const key = s.jobId + '|' + s.jobName;
-      if (!totals.has(key)) totals.set(key, { jobId: s.jobId, name: s.jobName, color: s.color, hours: 0, pay: 0 });
+      if (!totals.has(key)) totals.set(key, { jobId: s.jobId, name: s.jobName, color: s.color, hours: 0, pay: 0, shiftCount: 0 });
       const t = totals.get(key);
       t.hours += s.hours;
       t.pay += s.pay;
+      t.shiftCount += 1;
       grandHours += s.hours;
     }
   }
-  // 手当（交通費・食事補助など）は月ごとの固定額。その月に1件でもシフトがあったバイト先にだけ、1回分を加算する
+  // 手当（交通費・食事補助など）は行ごとに2種類：
+  //  - monthly:  その月に1件でもシフトがあれば、月1回だけ加算
+  //  - perShift: シフトを1件登録するたびに加算（登録件数ぶん）
   let grandPay = 0, grandAllowance = 0;
   for (const t of totals.values()) {
     const job = (state.jobsCache || []).find(j => j.id === t.jobId);
     const allowanceList = (job && job.allowances) || [];
-    t.allowance = allowanceList.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+    t.allowance = allowanceList.reduce((sum, a) => {
+      const amt = Number(a.amount) || 0;
+      return sum + (a.type === 'perShift' ? amt * t.shiftCount : amt);
+    }, 0);
     t.total = t.pay + t.allowance;
     grandAllowance += t.allowance;
     grandPay += t.total;
@@ -1208,13 +1215,17 @@ function renderColorPicker() {
   });
 }
 
-/* 手当（交通費・食事補助など、月ごとの固定額）の入力行 */
-function addAllowanceRow(name = '', amount = '') {
+/* 手当（交通費・食事補助など）の入力行。type: 'monthly'=月1回だけ加算 / 'perShift'=シフト1件ごとに加算 */
+function addAllowanceRow(name = '', amount = '', type = 'monthly') {
   const rows = document.getElementById('job-allowance-rows');
   const row = document.createElement('div');
   row.className = 'job-allowance-row';
   row.innerHTML = `<input type="text" class="allowance-name-input" placeholder="手当の名前（例：交通費）" value="${escapeHtml(name)}">
     <input type="number" class="allowance-amount-input" placeholder="金額" min="0" step="10" value="${amount}">
+    <select class="allowance-type-select" aria-label="加算のタイミング">
+      <option value="monthly"${type === 'perShift' ? '' : ' selected'}>月1回</option>
+      <option value="perShift"${type === 'perShift' ? ' selected' : ''}>出勤ごと</option>
+    </select>
     <button type="button" class="allowance-row-del" aria-label="この手当を削除">×</button>`;
   row.querySelector('.allowance-row-del').addEventListener('click', () => row.remove());
   rows.appendChild(row);
@@ -1222,8 +1233,8 @@ function addAllowanceRow(name = '', amount = '') {
 function resetJobAllowanceRows() {
   const rows = document.getElementById('job-allowance-rows');
   rows.innerHTML = '';
-  addAllowanceRow('交通費');
-  addAllowanceRow('食事補助');
+  addAllowanceRow('交通費', '', 'perShift');
+  addAllowanceRow('食事補助', '', 'perShift');
 }
 function collectAllowanceRows() {
   const rows = [...document.querySelectorAll('#job-allowance-rows .job-allowance-row')];
@@ -1231,6 +1242,7 @@ function collectAllowanceRows() {
     .map(row => ({
       name: row.querySelector('.allowance-name-input').value.trim(),
       amount: Number(row.querySelector('.allowance-amount-input').value) || 0,
+      type: row.querySelector('.allowance-type-select').value === 'perShift' ? 'perShift' : 'monthly',
     }))
     .filter(a => a.name && a.amount > 0);
 }
@@ -1251,7 +1263,7 @@ async function renderJobList() {
     row.className = 'job-row';
     const allowances = job.allowances || [];
     const allowanceText = allowances.length
-      ? `手当：${allowances.map(a => `${escapeHtml(a.name)} ${yen(a.amount)}/月`).join('・')}`
+      ? `手当：${allowances.map(a => `${escapeHtml(a.name)} ${yen(a.amount)}${a.type === 'perShift' ? '/出勤' : '/月'}`).join('・')}`
       : '';
     row.innerHTML = `<div class="job-row-top">
         <span class="job-color-dot" style="background:${job.color}"></span>
