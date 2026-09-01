@@ -164,15 +164,26 @@
 
   .job-color-dot { width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0; }
   .job-list { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
-  .job-row { display:flex; align-items:center; gap:8px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 10px; font-size:13px; }
+  .job-row { display:flex; flex-direction:column; gap:4px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 10px; font-size:13px; }
+  .job-row-top { display:flex; align-items:center; gap:8px; }
   .job-row-name { flex:1; font-weight:600; }
   .job-row-wage { color:var(--text-muted); }
+  .job-row-allowance { color:var(--text-muted); font-size:12px; padding-left:18px; }
   .job-del { border:none; background:transparent; color:var(--danger); font-size:12px; cursor:pointer; }
   .job-form { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   .job-form input { flex:1; min-width:120px; }
   .color-picker { display:flex; gap:6px; flex-wrap:wrap; width:100%; }
   .color-swatch { width:24px; height:24px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
   .color-swatch.selected { border-color: var(--text); }
+
+  .job-allowance-form { display:flex; flex-direction:column; gap:6px; }
+  .job-allowance-rows { display:flex; flex-direction:column; gap:6px; }
+  .job-allowance-row { display:flex; align-items:center; gap:6px; }
+  .job-allowance-row input[type="text"] { flex:1; min-width:90px; }
+  .job-allowance-row input[type="number"] { width:88px; flex:none; }
+  .allowance-row-del { border:none; background:transparent; color:var(--danger); font-size:12px; cursor:pointer; flex-shrink:0; padding:4px 6px; }
+  .allowance-add-btn { align-self:flex-start; border:1px dashed var(--border); background:transparent; color:var(--text-muted); border-radius:var(--radius-sm); padding:6px 12px; font-size:12.5px; cursor:pointer; }
+  .allowance-add-btn:hover { border-color:var(--primary); color:var(--primary); }
 
   .med-stock-list { display:flex; flex-direction:column; gap:8px; }
   .med-stock-row { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 12px; display:flex; flex-direction:column; gap:6px; }
@@ -196,6 +207,7 @@
     background: color-mix(in srgb, var(--shift-color) 14%, var(--bg-elevated)); color: var(--text);
     border-radius: var(--radius); padding:10px 14px; margin:0 4px 14px; font-size:13px; line-height:1.6;
   }
+  .med-stock-alert[hidden] { display:none; }
   .med-stock-alert strong { font-family: var(--font-display); }
 
   .feed-list { display:flex; flex-direction:column; gap:12px; padding-top:4px; }
@@ -382,8 +394,13 @@
           <input type="text" id="job-name-input" placeholder="バイト先名（例：コンビニA）">
           <input type="number" id="job-wage-input" placeholder="時給（円）" min="0" step="10">
           <div class="color-picker" id="job-color-picker"></div>
-          <button id="btn-add-job" class="add-shift-btn" type="button">追加</button>
         </div>
+        <div class="job-allowance-form">
+          <span class="hint-text">手当（交通費・食事補助など／月ごとの固定額・任意。その月に1回でも出勤があれば1回だけ加算されます）</span>
+          <div id="job-allowance-rows" class="job-allowance-rows"></div>
+          <button id="btn-add-allowance-row" class="allowance-add-btn" type="button">＋ 手当を追加</button>
+        </div>
+        <button id="btn-add-job" class="add-shift-btn" type="button">バイト先を追加</button>
       </section>
     </div>
   </div>
@@ -493,7 +510,7 @@ function computeShiftHours(startStr, endStr, breakMin) {
    IndexedDB データ層
    entries: { date(PK), medication, note, shifts[], hasMedia }
    media:   { id(PK,auto), date(index), type, mime, name, blob, createdAt }
-   jobs:    { id(PK,auto), name, hourlyWage, color, createdAt }
+   jobs:    { id(PK,auto), name, hourlyWage, color, allowances[{name,amount}](月固定), createdAt }
    medications: { id(PK,auto), name, unit, dailyDose, stockQuantity, stockDate, createdAt }
    ========================================================= */
 const DB_NAME = 'kirokuCalendarDB';
@@ -816,30 +833,41 @@ async function renderCalendar() {
 }
 
 function renderSalarySummary(entries) {
-  const totals = new Map(); // jobId -> {name,color,hours,pay}
-  let grandPay = 0, grandHours = 0;
+  const totals = new Map(); // jobId -> {jobId,name,color,hours,pay,allowance,total}
+  let grandHours = 0;
   for (const entry of entries) {
     if (!entry.shifts) continue;
     for (const s of entry.shifts) {
       const key = s.jobId + '|' + s.jobName;
-      if (!totals.has(key)) totals.set(key, { name: s.jobName, color: s.color, hours: 0, pay: 0 });
+      if (!totals.has(key)) totals.set(key, { jobId: s.jobId, name: s.jobName, color: s.color, hours: 0, pay: 0 });
       const t = totals.get(key);
       t.hours += s.hours;
       t.pay += s.pay;
-      grandPay += s.pay;
       grandHours += s.hours;
     }
   }
+  // 手当（交通費・食事補助など）は月ごとの固定額。その月に1件でもシフトがあったバイト先にだけ、1回分を加算する
+  let grandPay = 0, grandAllowance = 0;
+  for (const t of totals.values()) {
+    const job = (state.jobsCache || []).find(j => j.id === t.jobId);
+    const allowanceList = (job && job.allowances) || [];
+    t.allowance = allowanceList.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+    t.total = t.pay + t.allowance;
+    grandAllowance += t.allowance;
+    grandPay += t.total;
+  }
+
   const el = document.getElementById('salary-summary');
   if (totals.size === 0) {
     el.innerHTML = `<div class="salary-empty">${state.month + 1}月のバイト記録はまだありません</div>`;
     return;
   }
   let html = `<div class="salary-total"><span>${state.month + 1}月の給与合計</span><strong>${yen(grandPay)}</strong><span class="salary-hours">${grandHours.toFixed(1)}時間</span></div>`;
-  if (totals.size > 1) {
+  if (totals.size > 1 || grandAllowance > 0) {
     html += '<div class="salary-breakdown">';
     for (const t of totals.values()) {
-      html += `<div class="salary-row"><span class="job-color-dot" style="background:${t.color}"></span>${escapeHtml(t.name)}：${yen(t.pay)}（${t.hours.toFixed(1)}h）</div>`;
+      const allowanceNote = t.allowance > 0 ? `／手当${yen(t.allowance)}込み` : '';
+      html += `<div class="salary-row"><span class="job-color-dot" style="background:${t.color}"></span>${escapeHtml(t.name)}：${yen(t.total)}（${t.hours.toFixed(1)}h${allowanceNote}）</div>`;
     }
     html += '</div>';
   }
@@ -1179,6 +1207,36 @@ function renderColorPicker() {
     picker.appendChild(sw);
   });
 }
+
+/* 手当（交通費・食事補助など、月ごとの固定額）の入力行 */
+function addAllowanceRow(name = '', amount = '') {
+  const rows = document.getElementById('job-allowance-rows');
+  const row = document.createElement('div');
+  row.className = 'job-allowance-row';
+  row.innerHTML = `<input type="text" class="allowance-name-input" placeholder="手当の名前（例：交通費）" value="${escapeHtml(name)}">
+    <input type="number" class="allowance-amount-input" placeholder="金額" min="0" step="10" value="${amount}">
+    <button type="button" class="allowance-row-del" aria-label="この手当を削除">×</button>`;
+  row.querySelector('.allowance-row-del').addEventListener('click', () => row.remove());
+  rows.appendChild(row);
+}
+function resetJobAllowanceRows() {
+  const rows = document.getElementById('job-allowance-rows');
+  rows.innerHTML = '';
+  addAllowanceRow('交通費');
+  addAllowanceRow('食事補助');
+}
+function collectAllowanceRows() {
+  const rows = [...document.querySelectorAll('#job-allowance-rows .job-allowance-row')];
+  return rows
+    .map(row => ({
+      name: row.querySelector('.allowance-name-input').value.trim(),
+      amount: Number(row.querySelector('.allowance-amount-input').value) || 0,
+    }))
+    .filter(a => a.name && a.amount > 0);
+}
+document.getElementById('btn-add-allowance-row').addEventListener('click', () => addAllowanceRow());
+resetJobAllowanceRows();
+
 async function renderJobList() {
   const jobs = await Store.getAllJobs();
   state.jobsCache = jobs;
@@ -1191,10 +1249,17 @@ async function renderJobList() {
   jobs.forEach(job => {
     const row = document.createElement('div');
     row.className = 'job-row';
-    row.innerHTML = `<span class="job-color-dot" style="background:${job.color}"></span>
-      <span class="job-row-name">${escapeHtml(job.name)}</span>
-      <span class="job-row-wage">時給${yen(job.hourlyWage)}</span>
-      <button class="job-del" type="button" data-id="${job.id}">削除</button>`;
+    const allowances = job.allowances || [];
+    const allowanceText = allowances.length
+      ? `手当：${allowances.map(a => `${escapeHtml(a.name)} ${yen(a.amount)}/月`).join('・')}`
+      : '';
+    row.innerHTML = `<div class="job-row-top">
+        <span class="job-color-dot" style="background:${job.color}"></span>
+        <span class="job-row-name">${escapeHtml(job.name)}</span>
+        <span class="job-row-wage">時給${yen(job.hourlyWage)}</span>
+        <button class="job-del" type="button" data-id="${job.id}">削除</button>
+      </div>
+      ${allowanceText ? `<div class="job-row-allowance">${allowanceText}</div>` : ''}`;
     list.appendChild(row);
   });
   list.querySelectorAll('.job-del').forEach(btn => {
@@ -1202,6 +1267,7 @@ async function renderJobList() {
       if (!confirm('このバイト先を削除しますか？過去のシフト記録（給与計算含む）はそのまま残ります。')) return;
       await Store.deleteJob(Number(btn.dataset.id));
       await renderJobList();
+      await renderCalendar();
     });
   });
 }
@@ -1212,9 +1278,12 @@ document.getElementById('btn-add-job').addEventListener('click', async () => {
   const wage = Number(wageInput.value);
   if (!name) { toast('バイト先名を入力してください'); return; }
   if (!wage || wage <= 0) { toast('時給を正しく入力してください'); return; }
-  await Store.addJob({ name, hourlyWage: wage, color: selectedJobColor, createdAt: Date.now() });
+  const allowances = collectAllowanceRows();
+  await Store.addJob({ name, hourlyWage: wage, color: selectedJobColor, allowances, createdAt: Date.now() });
   nameInput.value = ''; wageInput.value = '';
+  resetJobAllowanceRows();
   await renderJobList();
+  await renderCalendar();
   toast('バイト先を追加しました');
 });
 
