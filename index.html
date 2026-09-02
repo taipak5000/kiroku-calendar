@@ -130,6 +130,11 @@
   .med-toggle-btn[data-status="taken"] { background: var(--med-taken-bg); border-color: var(--med-taken); color: var(--med-taken); }
   .med-toggle-btn[data-status="skipped"] { background: var(--med-skipped-bg); border-color: var(--med-skipped); color: var(--med-skipped); }
 
+  .med-status-list { display:flex; flex-direction:column; gap:8px; }
+  .med-status-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .med-status-name { font-size:14px; color:var(--text); }
+  .med-status-row .med-toggle-btn { align-self:auto; padding:8px 14px; font-size:13px; white-space:nowrap; }
+
   textarea, input[type="text"], input[type="number"], input[type="time"] {
     font-family: inherit; font-size:14px; padding:10px 12px; border:1px solid var(--border);
     border-radius: var(--radius-sm); background: var(--bg); color: var(--text); width:100%;
@@ -330,7 +335,8 @@
     <div class="modal-body">
       <div class="field-group">
         <label class="field-label">💊 服薬</label>
-        <button id="btn-medication" class="med-toggle-btn" data-status="none">未記録（タップで記録）</button>
+        <div id="med-status-list" class="med-status-list"></div>
+        <p id="med-status-empty-hint" class="hint-text" hidden>薬が登録されていません。右上の⚙️設定から登録すると、ここで薬ごとにチェックできるようになります。</p>
       </div>
 
       <div class="field-group">
@@ -374,7 +380,7 @@
     <div class="modal-body">
       <section class="settings-section">
         <h3 class="settings-section-title">薬の在庫</h3>
-        <p class="hint-text">残量と1日の服用数を登録すると、なくなる目安の日付を自動で計算します。残量を書き換えると、今日時点の数量として計算し直されます。</p>
+        <p class="hint-text">基準日時点の残量と1日の服用数を登録すると、カレンダーで「服薬した」と記録した日の分だけ自動で減算され、なくなる目安の日付を計算します。残量を書き換えると、今日を基準日として計算し直されます。</p>
         <div id="med-stock-list" class="med-stock-list"></div>
         <div class="med-stock-form">
           <input type="text" id="med-name-input" placeholder="薬の名前（例：血圧の薬）">
@@ -529,7 +535,8 @@ function computeShiftHours(startStr, endStr, breakMin) {
 
 /* =========================================================
    IndexedDB データ層
-   entries: { date(PK), medication, note, shifts[], hasMedia }
+   entries: { date(PK), medication（旧形式・1日1つの一括フラグ。互換のため読み取りのみ残す）,
+              medStatus{ [medicationId]: 'taken'|'skipped' }（薬ごとの服薬記録）, note, shifts[], hasMedia }
    media:   { id(PK,auto), date(index), type, mime, name, blob, createdAt }
    jobs:    { id(PK,auto), name, hourlyWage, color, allowances[{name,amount,type:'monthly'|'perShift'}],
               defaultStart, defaultEnd, defaultBreakMin（いつものシフト時間・任意）, createdAt }
@@ -801,6 +808,7 @@ async function renderCalendar() {
   const { start, end } = monthRangeKeys(state.year, state.month);
   const entries = await Store.getEntriesInRange(start, end);
   const entryMap = new Map(entries.map(e => [e.date, e]));
+  const meds = await Store.getAllMedications();
 
   const grid = document.getElementById('calendar-grid');
   grid.innerHTML = '';
@@ -832,8 +840,17 @@ async function renderCalendar() {
     dotsEl.className = 'day-dots';
     const entry = entryMap.get(key);
     if (entry) {
-      if (entry.medication === 'taken') dotsEl.appendChild(makeDot('dot-med-taken'));
-      else if (entry.medication === 'skipped') dotsEl.appendChild(makeDot('dot-med-skipped'));
+      let showMedTaken = false, showMedSkipped = false;
+      if (meds.length) {
+        for (const m of meds) {
+          const st = getMedStatusForDay(entry, m.id);
+          if (st === 'taken') showMedTaken = true;
+          else if (st === 'skipped') showMedSkipped = true;
+        }
+      } else if (entry.medication === 'taken') showMedTaken = true;
+      else if (entry.medication === 'skipped') showMedSkipped = true;
+      if (showMedTaken) dotsEl.appendChild(makeDot('dot-med-taken'));
+      if (showMedSkipped) dotsEl.appendChild(makeDot('dot-med-skipped'));
       if ((entry.note && entry.note.trim()) || entry.hasMedia) dotsEl.appendChild(makeDot('dot-note'));
       if (entry.shifts && entry.shifts.length) {
         const shiftDot = makeDot('dot-shift');
@@ -930,12 +947,35 @@ async function refreshJobsCache() {
 async function getOrCreateCurrentEntry() {
   const key = state.currentModalDate;
   let entry = await Store.getEntry(key);
-  if (!entry) entry = { date: key, medication: null, note: '', shifts: [], hasMedia: false };
+  if (!entry) entry = { date: key, medication: null, medStatus: {}, note: '', shifts: [], hasMedia: false };
   if (!entry.shifts) entry.shifts = [];
+  if (!entry.medStatus) entry.medStatus = {};
   return entry;
 }
+// 同じ日の記録に対する「取得→変更→保存」を直列化するための簡易ロック。
+// 服薬チェックやシフト追加などを立て続けに操作しても、互いの変更を上書きして消してしまわないようにする。
+let entryMutationChain = Promise.resolve();
+function withEntryLock(fn) {
+  const run = entryMutationChain.then(fn, fn);
+  entryMutationChain = run.then(() => {}, () => {});
+  return run;
+}
+// その日の、指定した薬の服薬状況を返す（'taken' / 'skipped' / null）。
+// entry.medStatus（薬ごとの記録）があればそちらを優先し、無い場合のみ
+// 旧形式のentry.medication（1日1つだけの一括フラグ）を全ての薬に適用したものとして扱う（過去データの互換用）。
+function getMedStatusForDay(entry, medId) {
+  if (!entry) return null;
+  if (entry.medStatus && Object.prototype.hasOwnProperty.call(entry.medStatus, medId)) {
+    return entry.medStatus[medId];
+  }
+  if (!entry.medStatus || Object.keys(entry.medStatus).length === 0) {
+    if (entry.medication) return entry.medication;
+  }
+  return null;
+}
 function isEntryEmpty(entry) {
-  return !entry.medication && !(entry.note && entry.note.trim()) && (!entry.shifts || entry.shifts.length === 0) && !entry.hasMedia;
+  const hasMedStatus = entry.medStatus && Object.keys(entry.medStatus).length > 0;
+  return !entry.medication && !hasMedStatus && !(entry.note && entry.note.trim()) && (!entry.shifts || entry.shifts.length === 0) && !entry.hasMedia;
 }
 async function saveEntry(entry) {
   if (isEntryEmpty(entry)) await Store.deleteEntry(entry.date);
@@ -944,9 +984,11 @@ async function saveEntry(entry) {
   await renderMedStockAlert(); // 服薬記録の変更が薬の残量計算に影響するため、毎回再計算する
 }
 async function saveCurrentEntryField(field, value) {
-  const entry = await getOrCreateCurrentEntry();
-  entry[field] = value;
-  await saveEntry(entry);
+  return withEntryLock(async () => {
+    const entry = await getOrCreateCurrentEntry();
+    entry[field] = value;
+    await saveEntry(entry);
+  });
 }
 
 async function openDayModal(key) {
@@ -955,7 +997,8 @@ async function openDayModal(key) {
 
   const entry = await getOrCreateCurrentEntry();
 
-  setMedButton(entry.medication || 'none');
+  const meds = await Store.getAllMedications();
+  renderMedStatusList(entry, meds);
   document.getElementById('note-textarea').value = entry.note || '';
 
   currentDayMedia = await Store.getMediaForDate(key);
@@ -972,17 +1015,44 @@ async function openDayModal(key) {
   showModal('day-modal');
 }
 
-function setMedButton(status) {
-  const btn = document.getElementById('btn-medication');
-  btn.dataset.status = status;
-  btn.textContent = status === 'taken' ? '✅ 服薬した' : status === 'skipped' ? '⛔ 服薬しなかった' : '未記録（タップで記録）';
+function medStatusLabel(status) {
+  return status === 'taken' ? '✅ 服薬した' : status === 'skipped' ? '⛔ 服薬しなかった' : '未記録（タップで記録）';
 }
-document.getElementById('btn-medication').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-medication');
+function renderMedStatusList(entry, meds) {
+  const listEl = document.getElementById('med-status-list');
+  const emptyHint = document.getElementById('med-status-empty-hint');
+  listEl.innerHTML = '';
+  if (!meds.length) {
+    emptyHint.hidden = false;
+    return;
+  }
+  emptyHint.hidden = true;
+  meds.forEach(med => {
+    const status = getMedStatusForDay(entry, med.id) || 'none';
+    const row = document.createElement('div');
+    row.className = 'med-status-row';
+    row.innerHTML = `
+      <span class="med-status-name">${escapeHtml(med.name)}</span>
+      <button type="button" class="med-toggle-btn" data-med-id="${med.id}" data-status="${status}">${medStatusLabel(status)}</button>`;
+    listEl.appendChild(row);
+  });
+}
+document.getElementById('med-status-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.med-toggle-btn');
+  if (!btn) return;
+  const medId = Number(btn.dataset.medId);
   const order = ['none', 'taken', 'skipped'];
   const next = order[(order.indexOf(btn.dataset.status) + 1) % order.length];
-  setMedButton(next);
-  await saveCurrentEntryField('medication', next === 'none' ? null : next);
+  // 保存を待つ前に見た目を先に更新しておく（連続タップしても次のタップが正しい状態から遷移できるようにする）
+  btn.dataset.status = next;
+  btn.textContent = medStatusLabel(next);
+  await withEntryLock(async () => {
+    const entry = await getOrCreateCurrentEntry();
+    entry.medStatus = entry.medStatus || {};
+    if (next === 'none') delete entry.medStatus[medId];
+    else entry.medStatus[medId] = next;
+    await saveEntry(entry);
+  });
 });
 
 let noteDebounceTimer = null;
@@ -1084,10 +1154,12 @@ function renderShiftList(shifts) {
   list.querySelectorAll('.shift-del').forEach(btn => {
     btn.addEventListener('click', async () => {
       const idx = Number(btn.dataset.idx);
-      const entry = await getOrCreateCurrentEntry();
-      entry.shifts.splice(idx, 1);
-      await saveEntry(entry);
-      renderShiftList(entry.shifts);
+      await withEntryLock(async () => {
+        const entry = await getOrCreateCurrentEntry();
+        entry.shifts.splice(idx, 1);
+        await saveEntry(entry);
+        renderShiftList(entry.shifts);
+      });
     });
   });
 }
@@ -1101,16 +1173,19 @@ document.getElementById('btn-add-shift').addEventListener('click', async () => {
   if (!start || !end) { toast('時刻を入力してください'); return; }
   const hours = computeShiftHours(start, end, breakMin);
   const pay = hours * job.hourlyWage;
-  const entry = await getOrCreateCurrentEntry();
-  entry.shifts.push({ jobId: job.id, jobName: job.name, hourlyWage: job.hourlyWage, color: job.color, start, end, breakMin, hours, pay });
-  await saveEntry(entry);
-  renderShiftList(entry.shifts);
+  await withEntryLock(async () => {
+    const entry = await getOrCreateCurrentEntry();
+    entry.shifts.push({ jobId: job.id, jobName: job.name, hourlyWage: job.hourlyWage, color: job.color, start, end, breakMin, hours, pay });
+    await saveEntry(entry);
+    renderShiftList(entry.shifts);
+  });
   toast('シフトを追加しました');
 });
 
 /* ---- 薬の在庫管理 ---- */
-// 「基準日の残量」から、実際に服薬した（medication==='taken'）日の分だけ減らして今日時点の残量を算出し、
+// 「基準日の残量」から、基準日を含めてそれ以降に実際に服薬した日の分だけ減らして今日時点の残量を算出し、
 // そこから先は1日あたりの服用数で一定ペースと仮定してなくなる日を予測する。
+// 薬ごとの服薬記録（entry.medStatus）があればそれを使い、無い日は旧形式（entry.medication）にフォールバックする。
 async function computeMedStock(med) {
   const dose = Number(med.dailyDose) || 0;
   const today = todayKey();
@@ -1119,11 +1194,11 @@ async function computeMedStock(med) {
 
   let balance = stockQuantity;
   let runOutDateKey = null; // 実績ベースで既に0を下回った日（まだ無ければnull）
-  const rangeStart = addDaysToKey(med.stockDate, 1);
+  const rangeStart = med.stockDate; // 基準日「時点」の残量なので、基準日を含めてそれ以降の服薬分を減算する
   if (rangeStart <= today) {
     const entries = await Store.getEntriesInRange(rangeStart, today); // dateの昇順で返る
     for (const e of entries) {
-      if (e.medication !== 'taken') continue;
+      if (getMedStatusForDay(e, med.id) !== 'taken') continue;
       balance -= dose;
       if (balance <= 0 && runOutDateKey === null) runOutDateKey = e.date;
     }
@@ -1163,7 +1238,7 @@ async function renderMedStockList() {
           <button class="med-del" type="button" data-id="${med.id}">削除</button>
         </div>
         <div class="med-stock-row-controls">
-          <span>残量</span><input type="number" class="med-qty-edit" data-id="${med.id}" value="${med.stockQuantity}" min="0" step="1"><span>${unit}</span>
+          <span>基準日の残量</span><input type="number" class="med-qty-edit" data-id="${med.id}" value="${med.stockQuantity}" min="0" step="1"><span>${unit}</span>
           <span>・1日</span><input type="number" class="med-dose-edit" data-id="${med.id}" value="${med.dailyDose}" min="0.5" step="0.5"><span>${unit}</span>
           <span>・基準日 ${formatDateShortJp(med.stockDate)}</span>
         </div>
@@ -1490,8 +1565,9 @@ const Feed = {
       return;
     }
     const listEl = document.getElementById('feed-list');
+    const meds = await Store.getAllMedications();
     for (const entry of results) {
-      const card = await buildFeedCard(entry);
+      const card = await buildFeedCard(entry, meds);
       listEl.appendChild(card);
     }
     this.cursor = addDaysToKey(results[results.length - 1].date, -1);
@@ -1500,7 +1576,7 @@ const Feed = {
   }
 };
 
-async function buildFeedCard(entry) {
+async function buildFeedCard(entry, meds) {
   const card = document.createElement('article');
   card.className = 'feed-card';
 
@@ -1518,8 +1594,18 @@ async function buildFeedCard(entry) {
   }
 
   let medBadge = '';
-  if (entry.medication === 'taken') medBadge = '<span class="badge badge-med-taken">💊 服薬した</span>';
-  else if (entry.medication === 'skipped') medBadge = '<span class="badge badge-med-skipped">💊 服薬しなかった</span>';
+  if (meds && meds.length) {
+    medBadge = meds.map(m => {
+      const st = getMedStatusForDay(entry, m.id);
+      if (st === 'taken') return `<span class="badge badge-med-taken">💊 ${escapeHtml(m.name)}：服薬した</span>`;
+      if (st === 'skipped') return `<span class="badge badge-med-skipped">💊 ${escapeHtml(m.name)}：服薬しなかった</span>`;
+      return '';
+    }).join('');
+  } else if (entry.medication === 'taken') {
+    medBadge = '<span class="badge badge-med-taken">💊 服薬した</span>';
+  } else if (entry.medication === 'skipped') {
+    medBadge = '<span class="badge badge-med-skipped">💊 服薬しなかった</span>';
+  }
 
   let shiftsHtml = '';
   if (entry.shifts && entry.shifts.length) {
