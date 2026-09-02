@@ -141,10 +141,12 @@
   }
   textarea { resize: vertical; }
 
-  .attachment-list { display:flex; flex-wrap:wrap; gap:8px; }
-  .attachment-item { position:relative; width:72px; height:72px; border-radius:var(--radius-sm); overflow:hidden; background:#000; cursor: pointer; }
-  .attachment-item img, .attachment-item video { width:100%; height:100%; object-fit:cover; display:block; }
-  .attachment-del { position:absolute; top:2px; right:2px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(0,0,0,.6); color:#fff; font-size:12px; cursor:pointer; line-height:1; }
+  .attachment-list { display:flex; flex-direction:column; gap:8px; }
+  .attachment-item { position:relative; display:flex; align-items:center; gap:10px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 34px 8px 8px; }
+  .attachment-thumb { width:64px; height:64px; border-radius:var(--radius-sm); overflow:hidden; background:#000; cursor:pointer; flex-shrink:0; }
+  .attachment-thumb img, .attachment-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
+  .attachment-caption-input { flex:1; min-width:0; font-size:13px; padding:8px 10px; }
+  .attachment-del { position:absolute; top:8px; right:8px; border:none; background:transparent; color:var(--text-muted); font-size:16px; cursor:pointer; line-height:1; padding:2px; }
   .upload-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:10px 14px; border:1px dashed var(--border); border-radius:var(--radius-sm); font-size:13px; cursor:pointer; color:var(--text-muted); width:fit-content; }
   .upload-btn:hover { border-color: var(--primary); color: var(--primary); }
 
@@ -234,8 +236,10 @@
   .badge-med-taken { background: var(--med-taken-bg); color: var(--med-taken); border-color:var(--med-taken); }
   .badge-med-skipped { background: var(--med-skipped-bg); color: var(--med-skipped); border-color:var(--med-skipped); }
   .feed-note { font-size:14px; line-height:1.6; white-space:pre-wrap; margin:8px 0; }
-  .feed-media-grid { display:grid; grid-template-columns: repeat(3,1fr); gap:6px; margin:8px 0; }
+  .feed-media-grid { display:grid; grid-template-columns: repeat(2,1fr); gap:10px; margin:8px 0; }
+  .feed-media-cell { display:flex; flex-direction:column; gap:4px; }
   .feed-media-item { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:8px; cursor:pointer; background:#000; }
+  .feed-media-caption { font-size:12.5px; color:var(--text-muted); line-height:1.4; padding:0 2px; word-break:break-word; }
   .feed-shifts { display:flex; flex-direction:column; gap:4px; margin-top:8px; }
   .badge-shift { border-radius:8px; justify-content:flex-start; }
   .feed-sentinel { text-align:center; padding:20px; font-size:13px; color: var(--text-muted); }
@@ -243,7 +247,8 @@
 
   #lightbox { background: rgba(0,0,0,.85); }
   .lightbox-content { max-width:92vw; max-height:82vh; }
-  .lightbox-content img, .lightbox-content video { max-width:92vw; max-height:82vh; border-radius:8px; }
+  .lightbox-content img, .lightbox-content video { max-width:92vw; max-height:82vh; border-radius:8px; display:block; }
+  .lightbox-caption { color:#fff; font-size:14px; line-height:1.6; text-align:center; margin-top:12px; max-width:92vw; }
   .lightbox-close { position:absolute; top:16px; right:16px; color:#fff; font-size:28px; background:transparent; border:none; cursor:pointer; }
 
   .toast {
@@ -537,7 +542,7 @@ function computeShiftHours(startStr, endStr, breakMin) {
    IndexedDB データ層
    entries: { date(PK), medication（旧形式・1日1つの一括フラグ。互換のため読み取りのみ残す）,
               medStatus{ [medicationId]: 'taken'|'skipped' }（薬ごとの服薬記録）, note, shifts[], hasMedia }
-   media:   { id(PK,auto), date(index), type, mime, name, blob, createdAt }
+   media:   { id(PK,auto), date(index), type, mime, name, blob, createdAt, caption（その写真・動画単体へのコメント・任意） }
    jobs:    { id(PK,auto), name, hourlyWage, color, allowances[{name,amount,type:'monthly'|'perShift'}],
               defaultStart, defaultEnd, defaultBreakMin（いつものシフト時間・任意）, createdAt }
    medications: { id(PK,auto), name, unit, dailyDose, stockQuantity, stockDate, createdAt }
@@ -657,6 +662,14 @@ const Store = {
     t.objectStore('media').put(record);
     return txDone(t);
   },
+  async updateMediaCaption(id, caption) {
+    const db = await getDB();
+    const t = db.transaction('media', 'readwrite');
+    const store = t.objectStore('media');
+    const rec = await reqToPromise(store.get(id));
+    if (rec) { rec.caption = caption; store.put(rec); }
+    return txDone(t);
+  },
   async getMediaForDate(dateKey) {
     const db = await getDB();
     const t = db.transaction('media', 'readonly');
@@ -760,11 +773,13 @@ document.addEventListener('keydown', (e) => {
     overlay.addEventListener('click', (e) => { if (e.target === overlay) hideModal(overlayId); });
   });
 
-function openLightbox(url, type) {
+function openLightbox(url, type, caption) {
   const content = document.getElementById('lightbox-content');
-  content.innerHTML = type === 'video'
+  const mediaHtml = type === 'video'
     ? `<video src="${url}" controls autoplay></video>`
     : `<img src="${url}" alt="添付メディア">`;
+  const captionHtml = caption ? `<div class="lightbox-caption">${escapeHtml(caption)}</div>` : '';
+  content.innerHTML = mediaHtml + captionHtml;
   showModal('lightbox');
 }
 
@@ -1069,22 +1084,31 @@ function renderAttachmentList() {
     const url = URL.createObjectURL(m.blob);
     const item = document.createElement('div');
     item.className = 'attachment-item';
-    item.innerHTML = m.type === 'video' ? `<video src="${url}" muted></video>` : `<img src="${url}" alt="添付画像">`;
-    const delBtn = document.createElement('button');
-    delBtn.className = 'attachment-del';
-    delBtn.type = 'button';
-    delBtn.textContent = '×';
-    delBtn.addEventListener('click', async (ev) => {
+    item.innerHTML = `
+      <div class="attachment-thumb">${m.type === 'video' ? `<video src="${url}" muted></video>` : `<img src="${url}" alt="添付画像">`}</div>
+      <input type="text" class="attachment-caption-input" placeholder="この写真・動画へのコメント（任意）" value="${escapeHtml(m.caption || '')}">
+      <button class="attachment-del" type="button" aria-label="削除">×</button>`;
+    item.querySelector('.attachment-thumb').addEventListener('click', () => openLightbox(url, m.type, m.caption));
+    item.querySelector('.attachment-del').addEventListener('click', async (ev) => {
       ev.stopPropagation();
       await Store.deleteMedia(m.id);
       currentDayMedia = currentDayMedia.filter(x => x.id !== m.id);
       renderAttachmentList();
-      const entry = await getOrCreateCurrentEntry();
-      entry.hasMedia = currentDayMedia.length > 0;
-      await saveEntry(entry);
+      await withEntryLock(async () => {
+        const entry = await getOrCreateCurrentEntry();
+        entry.hasMedia = currentDayMedia.length > 0;
+        await saveEntry(entry);
+      });
     });
-    item.appendChild(delBtn);
-    item.addEventListener('click', () => openLightbox(url, m.type));
+    let captionDebounce = null;
+    item.querySelector('.attachment-caption-input').addEventListener('input', (ev) => {
+      const val = ev.target.value;
+      clearTimeout(captionDebounce);
+      captionDebounce = setTimeout(async () => {
+        m.caption = val;
+        await Store.updateMediaCaption(m.id, val);
+      }, 500);
+    });
     list.appendChild(item);
   }
 }
@@ -1093,14 +1117,16 @@ document.getElementById('attachment-input').addEventListener('change', async (e)
   if (!files.length) return;
   for (const file of files) {
     const type = file.type.startsWith('video') ? 'video' : 'image';
-    const record = { date: state.currentModalDate, type, mime: file.type, name: file.name, blob: file, createdAt: Date.now() };
+    const record = { date: state.currentModalDate, type, mime: file.type, name: file.name, blob: file, createdAt: Date.now(), caption: '' };
     const id = await Store.addMedia(record);
     currentDayMedia.push({ ...record, id });
   }
   renderAttachmentList();
-  const entry = await getOrCreateCurrentEntry();
-  entry.hasMedia = true;
-  await saveEntry(entry);
+  await withEntryLock(async () => {
+    const entry = await getOrCreateCurrentEntry();
+    entry.hasMedia = true;
+    await saveEntry(entry);
+  });
   e.target.value = '';
 });
 
@@ -1586,9 +1612,12 @@ async function buildFeedCard(entry, meds) {
     if (media.length) {
       mediaHtml = '<div class="feed-media-grid">' + media.map(m => {
         const url = URL.createObjectURL(m.blob);
-        return m.type === 'video'
-          ? `<video src="${url}" class="feed-media-item" data-type="video" muted></video>`
-          : `<img src="${url}" class="feed-media-item" data-type="image" alt="添付画像">`;
+        const captionAttr = escapeHtml(m.caption || '');
+        const mediaTag = m.type === 'video'
+          ? `<video src="${url}" class="feed-media-item" data-type="video" data-caption="${captionAttr}" muted></video>`
+          : `<img src="${url}" class="feed-media-item" data-type="image" data-caption="${captionAttr}" alt="添付画像">`;
+        const captionHtml = m.caption ? `<div class="feed-media-caption">${escapeHtml(m.caption)}</div>` : '';
+        return `<div class="feed-media-cell">${mediaTag}${captionHtml}</div>`;
       }).join('') + '</div>';
     }
   }
@@ -1633,7 +1662,7 @@ async function buildFeedCard(entry, meds) {
     openDayModal(entry.date);
   });
   card.querySelectorAll('.feed-media-item').forEach(el => {
-    el.addEventListener('click', () => openLightbox(el.src, el.dataset.type));
+    el.addEventListener('click', () => openLightbox(el.src, el.dataset.type, el.dataset.caption));
   });
   return card;
 }
@@ -1667,7 +1696,7 @@ document.getElementById('btn-export').addEventListener('click', async () => {
       Store.getAllJobs(), Store.getAllEntries(), Store.getAllMedia(), Store.getAllMedications()
     ]);
     const zip = new JSZip();
-    const mediaMeta = media.map(m => ({ id: m.id, date: m.date, type: m.type, mime: m.mime, name: m.name, createdAt: m.createdAt }));
+    const mediaMeta = media.map(m => ({ id: m.id, date: m.date, type: m.type, mime: m.mime, name: m.name, createdAt: m.createdAt, caption: m.caption || '' }));
     const dataJson = { version: 2, exportedAt: new Date().toISOString(), jobs, entries, mediaMeta, medications };
     zip.file('data.json', JSON.stringify(dataJson, null, 2));
     const mediaFolder = zip.folder('media');
@@ -1716,7 +1745,7 @@ document.getElementById('import-input').addEventListener('change', async (e) => 
       const zf = zip.file(`media/${meta.id}.${ext}`);
       if (!zf) continue;
       const blob = await zf.async('blob');
-      await Store.putMediaRaw({ id: meta.id, date: meta.date, type: meta.type, mime: meta.mime, name: meta.name, blob, createdAt: meta.createdAt });
+      await Store.putMediaRaw({ id: meta.id, date: meta.date, type: meta.type, mime: meta.mime, name: meta.name, blob, createdAt: meta.createdAt, caption: meta.caption || '' });
     }
 
     await refreshJobsCache();
