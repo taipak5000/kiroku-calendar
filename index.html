@@ -170,6 +170,9 @@
   .job-row-wage { color:var(--text-muted); }
   .job-row-allowance { color:var(--text-muted); font-size:12px; padding-left:18px; }
   .job-del { border:none; background:transparent; color:var(--danger); font-size:12px; cursor:pointer; }
+  .job-edit { border:none; background:transparent; color:var(--primary); font-size:12px; cursor:pointer; }
+  .job-form-actions { display:flex; align-items:center; gap:10px; }
+  .cancel-edit-btn { border:none; background:transparent; color:var(--text-muted); font-size:13px; cursor:pointer; text-decoration:underline; }
   .job-form { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   .job-form input { flex:1; min-width:120px; }
   .color-picker { display:flex; gap:6px; flex-wrap:wrap; width:100%; }
@@ -414,7 +417,10 @@
           <div id="job-allowance-rows" class="job-allowance-rows"></div>
           <button id="btn-add-allowance-row" class="allowance-add-btn" type="button">＋ 手当を追加</button>
         </div>
-        <button id="btn-add-job" class="add-shift-btn" type="button">バイト先を追加</button>
+        <div class="job-form-actions">
+          <button id="btn-add-job" class="add-shift-btn" type="button">バイト先を追加</button>
+          <button id="btn-cancel-edit-job" class="cancel-edit-btn" type="button" hidden>キャンセル</button>
+        </div>
       </section>
     </div>
   </div>
@@ -718,6 +724,7 @@ const Store = {
    ========================================================= */
 const JOB_COLORS = ['#c1892f', '#3d7ea6', '#a65a56', '#5f9e6f', '#7c6a9c', '#4a8b83', '#b0793f', '#6b7fa0'];
 let selectedJobColor = JOB_COLORS[0];
+let editingJobId = null; // nullなら新規追加モード、値があればそのidのバイト先を編集中
 
 const state = {
   year: new Date().getFullYear(),
@@ -1264,6 +1271,11 @@ function resetJobAllowanceRows() {
   addAllowanceRow('交通費', '', 'perShift');
   addAllowanceRow('食事補助', '', 'perShift');
 }
+function loadAllowanceRowsFrom(allowances) {
+  const rows = document.getElementById('job-allowance-rows');
+  rows.innerHTML = '';
+  (allowances || []).forEach(a => addAllowanceRow(a.name, a.amount, a.type));
+}
 function collectAllowanceRows() {
   const rows = [...document.querySelectorAll('#job-allowance-rows .job-allowance-row')];
   return rows
@@ -1300,6 +1312,7 @@ async function renderJobList() {
         <span class="job-color-dot" style="background:${job.color}"></span>
         <span class="job-row-name">${escapeHtml(job.name)}</span>
         <span class="job-row-wage">時給${yen(job.hourlyWage)}</span>
+        <button class="job-edit" type="button" data-id="${job.id}">編集</button>
         <button class="job-del" type="button" data-id="${job.id}">削除</button>
       </div>
       ${shiftDefaultText ? `<div class="job-row-allowance">${shiftDefaultText}</div>` : ''}
@@ -1310,11 +1323,51 @@ async function renderJobList() {
     btn.addEventListener('click', async () => {
       if (!confirm('このバイト先を削除しますか？過去のシフト記録（給与計算含む）はそのまま残ります。')) return;
       await Store.deleteJob(Number(btn.dataset.id));
+      if (editingJobId === Number(btn.dataset.id)) cancelJobEdit();
       await renderJobList();
       await renderCalendar();
     });
   });
+  list.querySelectorAll('.job-edit').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const job = jobs.find(j => j.id === Number(btn.dataset.id));
+      if (job) startEditJob(job);
+    });
+  });
 }
+/* バイト先の追加フォームを「新規追加」の初期状態に戻す（編集モードの解除も兼ねる） */
+function resetJobForm() {
+  document.getElementById('job-name-input').value = '';
+  document.getElementById('job-wage-input').value = '';
+  document.getElementById('job-default-start-input').value = '';
+  document.getElementById('job-default-end-input').value = '';
+  document.getElementById('job-default-break-input').value = '';
+  selectedJobColor = JOB_COLORS[0];
+  renderColorPicker();
+  resetJobAllowanceRows();
+  editingJobId = null;
+  document.getElementById('btn-add-job').textContent = 'バイト先を追加';
+  document.getElementById('btn-cancel-edit-job').hidden = true;
+}
+/* 既存のバイト先を編集モードで開く：追加フォームにそのバイト先の内容を読み込む */
+function startEditJob(job) {
+  editingJobId = job.id;
+  document.getElementById('job-name-input').value = job.name;
+  document.getElementById('job-wage-input').value = job.hourlyWage;
+  document.getElementById('job-default-start-input').value = job.defaultStart || '';
+  document.getElementById('job-default-end-input').value = job.defaultEnd || '';
+  document.getElementById('job-default-break-input').value = job.defaultBreakMin ?? '';
+  selectedJobColor = job.color;
+  renderColorPicker();
+  loadAllowanceRowsFrom(job.allowances);
+  document.getElementById('btn-add-job').textContent = 'バイト先を更新';
+  document.getElementById('btn-cancel-edit-job').hidden = false;
+  toast(`「${job.name}」を編集中です`);
+}
+function cancelJobEdit() {
+  resetJobForm();
+}
+document.getElementById('btn-cancel-edit-job').addEventListener('click', () => cancelJobEdit());
 document.getElementById('btn-add-job').addEventListener('click', async () => {
   const nameInput = document.getElementById('job-name-input');
   const wageInput = document.getElementById('job-wage-input');
@@ -1329,13 +1382,20 @@ document.getElementById('btn-add-job').addEventListener('click', async () => {
   const defaultStart = defaultStartInput.value || null;
   const defaultEnd = defaultEndInput.value || null;
   const defaultBreakMin = defaultBreakInput.value !== '' ? Number(defaultBreakInput.value) : null;
-  await Store.addJob({ name, hourlyWage: wage, color: selectedJobColor, allowances, defaultStart, defaultEnd, defaultBreakMin, createdAt: Date.now() });
-  nameInput.value = ''; wageInput.value = '';
-  defaultStartInput.value = ''; defaultEndInput.value = ''; defaultBreakInput.value = '';
-  resetJobAllowanceRows();
-  await renderJobList();
-  await renderCalendar();
-  toast('バイト先を追加しました');
+  if (editingJobId) {
+    const existing = state.jobsCache.find(j => j.id === editingJobId) || {};
+    await Store.putJob({ ...existing, id: editingJobId, name, hourlyWage: wage, color: selectedJobColor, allowances, defaultStart, defaultEnd, defaultBreakMin });
+    resetJobForm();
+    await renderJobList();
+    await renderCalendar();
+    toast('バイト先を更新しました');
+  } else {
+    await Store.addJob({ name, hourlyWage: wage, color: selectedJobColor, allowances, defaultStart, defaultEnd, defaultBreakMin, createdAt: Date.now() });
+    resetJobForm();
+    await renderJobList();
+    await renderCalendar();
+    toast('バイト先を追加しました');
+  }
 });
 
 /* =========================================================
