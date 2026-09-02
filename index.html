@@ -200,6 +200,7 @@
   .med-del { border:none; background:transparent; color:var(--danger); font-size:12px; cursor:pointer; flex-shrink:0; }
   .med-stock-row-controls { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12px; color:var(--text-muted); }
   .med-stock-row-controls input[type="number"] { width:64px; padding:6px 8px; font-size:13px; }
+  .med-stock-current { font-size:12.5px; color: var(--text); font-weight:600; font-variant-numeric: tabular-nums; }
   .med-stock-eta { font-size:12.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .med-stock-eta.low { color: var(--shift-color); font-weight:600; }
   .med-stock-eta.empty { color: var(--danger); font-weight:600; }
@@ -940,6 +941,7 @@ async function saveEntry(entry) {
   if (isEntryEmpty(entry)) await Store.deleteEntry(entry.date);
   else await Store.putEntry(entry);
   await renderCalendar();
+  await renderMedStockAlert(); // 服薬記録の変更が薬の残量計算に影響するため、毎回再計算する
 }
 async function saveCurrentEntryField(field, value) {
   const entry = await getOrCreateCurrentEntry();
@@ -1107,13 +1109,32 @@ document.getElementById('btn-add-shift').addEventListener('click', async () => {
 });
 
 /* ---- 薬の在庫管理 ---- */
-function computeMedStock(med) {
+// 「基準日の残量」から、実際に服薬した（medication==='taken'）日の分だけ減らして今日時点の残量を算出し、
+// そこから先は1日あたりの服用数で一定ペースと仮定してなくなる日を予測する。
+async function computeMedStock(med) {
   const dose = Number(med.dailyDose) || 0;
-  if (dose <= 0) return { totalDays: 0, runOutDateKey: med.stockDate, daysLeft: 0 };
-  const totalDays = Math.floor(Number(med.stockQuantity) / dose);
-  const runOutDateKey = addDaysToKey(med.stockDate, totalDays);
-  const daysLeft = daysBetween(todayKey(), runOutDateKey);
-  return { totalDays, runOutDateKey, daysLeft };
+  const today = todayKey();
+  const stockQuantity = Number(med.stockQuantity) || 0;
+  if (dose <= 0) return { runOutDateKey: med.stockDate, daysLeft: 0, currentStock: stockQuantity };
+
+  let balance = stockQuantity;
+  let runOutDateKey = null; // 実績ベースで既に0を下回った日（まだ無ければnull）
+  const rangeStart = addDaysToKey(med.stockDate, 1);
+  if (rangeStart <= today) {
+    const entries = await Store.getEntriesInRange(rangeStart, today); // dateの昇順で返る
+    for (const e of entries) {
+      if (e.medication !== 'taken') continue;
+      balance -= dose;
+      if (balance <= 0 && runOutDateKey === null) runOutDateKey = e.date;
+    }
+  }
+  if (runOutDateKey === null) {
+    const daysLeftFromToday = Math.floor(balance / dose);
+    runOutDateKey = addDaysToKey(today, daysLeftFromToday);
+  }
+  const daysLeft = daysBetween(today, runOutDateKey);
+  const currentStock = Math.max(0, Math.round(balance * 10) / 10);
+  return { runOutDateKey, daysLeft, currentStock };
 }
 
 async function renderMedStockList() {
@@ -1123,8 +1144,8 @@ async function renderMedStockList() {
   if (!meds.length) {
     list.innerHTML = '<p class="hint-text">まだ薬が登録されていません</p>';
   } else {
-    meds.forEach(med => {
-      const { runOutDateKey, daysLeft } = computeMedStock(med);
+    const computedList = await Promise.all(meds.map(async med => ({ med, ...(await computeMedStock(med)) })));
+    computedList.forEach(({ med, runOutDateKey, daysLeft, currentStock }) => {
       const unit = escapeHtml(med.unit || '錠');
       let etaClass = '', etaText = '';
       if (daysLeft < 0) {
@@ -1146,6 +1167,7 @@ async function renderMedStockList() {
           <span>・1日</span><input type="number" class="med-dose-edit" data-id="${med.id}" value="${med.dailyDose}" min="0.5" step="0.5"><span>${unit}</span>
           <span>・基準日 ${formatDateShortJp(med.stockDate)}</span>
         </div>
+        <div class="med-stock-current">服薬記録から計算した現在の残量：${currentStock}${unit}</div>
         <div class="med-stock-eta ${etaClass}">${etaText}</div>`;
       list.appendChild(row);
     });
@@ -1192,8 +1214,8 @@ async function renderMedStockList() {
 async function renderMedStockAlert() {
   const meds = await Store.getAllMedications();
   const alertEl = document.getElementById('med-stock-alert');
-  const lowOnes = meds
-    .map(med => ({ med, ...computeMedStock(med) }))
+  const computed = await Promise.all(meds.map(async med => ({ med, ...(await computeMedStock(med)) })));
+  const lowOnes = computed
     .filter(x => x.daysLeft <= 7)
     .sort((a, b) => a.daysLeft - b.daysLeft);
   if (!lowOnes.length) { alertEl.hidden = true; alertEl.innerHTML = ''; return; }
