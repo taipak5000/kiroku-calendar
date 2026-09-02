@@ -176,6 +176,10 @@
   .color-swatch { width:24px; height:24px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
   .color-swatch.selected { border-color: var(--text); }
 
+  .job-default-shift-form { display:flex; flex-direction:column; gap:6px; }
+  .job-default-shift-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  .job-default-shift-row input[type="time"] { width:auto; flex:1; min-width:90px; }
+
   .job-allowance-form { display:flex; flex-direction:column; gap:6px; }
   .job-allowance-rows { display:flex; flex-direction:column; gap:6px; }
   .job-allowance-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
@@ -396,6 +400,15 @@
           <input type="number" id="job-wage-input" placeholder="時給（円）" min="0" step="10">
           <div class="color-picker" id="job-color-picker"></div>
         </div>
+        <div class="job-default-shift-form">
+          <span class="hint-text">いつものシフト時間（任意）。設定すると、このバイト先を選んだときにシフト登録の時刻へ自動で入力されます</span>
+          <div class="job-default-shift-row">
+            <input type="time" id="job-default-start-input" aria-label="いつもの開始時刻">
+            <span>〜</span>
+            <input type="time" id="job-default-end-input" aria-label="いつもの終了時刻">
+            <label class="break-label">休憩<input type="number" id="job-default-break-input" min="0" step="5" placeholder="0" aria-label="いつもの休憩時間">分</label>
+          </div>
+        </div>
         <div class="job-allowance-form">
           <span class="hint-text">手当（交通費・食事補助など・任意）。行ごとに「月1回」（その月に出勤が1回でもあれば1回だけ加算）か「出勤ごと」（シフトを1件登録するたびに加算）を選べます</span>
           <div id="job-allowance-rows" class="job-allowance-rows"></div>
@@ -511,7 +524,8 @@ function computeShiftHours(startStr, endStr, breakMin) {
    IndexedDB データ層
    entries: { date(PK), medication, note, shifts[], hasMedia }
    media:   { id(PK,auto), date(index), type, mime, name, blob, createdAt }
-   jobs:    { id(PK,auto), name, hourlyWage, color, allowances[{name,amount,type:'monthly'|'perShift'}], createdAt }
+   jobs:    { id(PK,auto), name, hourlyWage, color, allowances[{name,amount,type:'monthly'|'perShift'}],
+              defaultStart, defaultEnd, defaultBreakMin（いつものシフト時間・任意）, createdAt }
    medications: { id(PK,auto), name, unit, dailyDose, stockQuantity, stockDate, createdAt }
    ========================================================= */
 const DB_NAME = 'kirokuCalendarDB';
@@ -1032,7 +1046,21 @@ function populateJobSelect() {
     opt.textContent = `${job.name}（時給${yen(job.hourlyWage)}）`;
     sel.appendChild(opt);
   }
+  applyJobShiftDefaults(state.jobsCache.find(j => j.id === Number(sel.value)));
 }
+/* バイトごとの「いつものシフト時間」を、シフト登録フォームに反映する */
+function applyJobShiftDefaults(job) {
+  if (!job) return;
+  const startInput = document.getElementById('shift-start');
+  const endInput = document.getElementById('shift-end');
+  const breakInput = document.getElementById('shift-break');
+  if (job.defaultStart) startInput.value = job.defaultStart;
+  if (job.defaultEnd) endInput.value = job.defaultEnd;
+  if (job.defaultBreakMin !== null && job.defaultBreakMin !== undefined) breakInput.value = job.defaultBreakMin;
+}
+document.getElementById('shift-job-select').addEventListener('change', (e) => {
+  applyJobShiftDefaults(state.jobsCache.find(j => j.id === Number(e.target.value)));
+});
 function renderShiftList(shifts) {
   const list = document.getElementById('shift-list');
   list.innerHTML = '';
@@ -1265,12 +1293,16 @@ async function renderJobList() {
     const allowanceText = allowances.length
       ? `手当：${allowances.map(a => `${escapeHtml(a.name)} ${yen(a.amount)}${a.type === 'perShift' ? '/出勤' : '/月'}`).join('・')}`
       : '';
+    const shiftDefaultText = (job.defaultStart && job.defaultEnd)
+      ? `いつもの時間：${job.defaultStart}〜${job.defaultEnd}${job.defaultBreakMin ? '（休憩' + job.defaultBreakMin + '分）' : ''}`
+      : '';
     row.innerHTML = `<div class="job-row-top">
         <span class="job-color-dot" style="background:${job.color}"></span>
         <span class="job-row-name">${escapeHtml(job.name)}</span>
         <span class="job-row-wage">時給${yen(job.hourlyWage)}</span>
         <button class="job-del" type="button" data-id="${job.id}">削除</button>
       </div>
+      ${shiftDefaultText ? `<div class="job-row-allowance">${shiftDefaultText}</div>` : ''}
       ${allowanceText ? `<div class="job-row-allowance">${allowanceText}</div>` : ''}`;
     list.appendChild(row);
   });
@@ -1286,13 +1318,20 @@ async function renderJobList() {
 document.getElementById('btn-add-job').addEventListener('click', async () => {
   const nameInput = document.getElementById('job-name-input');
   const wageInput = document.getElementById('job-wage-input');
+  const defaultStartInput = document.getElementById('job-default-start-input');
+  const defaultEndInput = document.getElementById('job-default-end-input');
+  const defaultBreakInput = document.getElementById('job-default-break-input');
   const name = nameInput.value.trim();
   const wage = Number(wageInput.value);
   if (!name) { toast('バイト先名を入力してください'); return; }
   if (!wage || wage <= 0) { toast('時給を正しく入力してください'); return; }
   const allowances = collectAllowanceRows();
-  await Store.addJob({ name, hourlyWage: wage, color: selectedJobColor, allowances, createdAt: Date.now() });
+  const defaultStart = defaultStartInput.value || null;
+  const defaultEnd = defaultEndInput.value || null;
+  const defaultBreakMin = defaultBreakInput.value !== '' ? Number(defaultBreakInput.value) : null;
+  await Store.addJob({ name, hourlyWage: wage, color: selectedJobColor, allowances, defaultStart, defaultEnd, defaultBreakMin, createdAt: Date.now() });
   nameInput.value = ''; wageInput.value = '';
+  defaultStartInput.value = ''; defaultEndInput.value = ''; defaultBreakInput.value = '';
   resetJobAllowanceRows();
   await renderJobList();
   await renderCalendar();
