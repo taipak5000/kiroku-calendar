@@ -147,6 +147,13 @@
   .attachment-thumb img, .attachment-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
   .attachment-caption-input { flex:1; min-width:0; font-size:13px; padding:8px 10px; }
   .attachment-del { position:absolute; top:8px; right:8px; border:none; background:transparent; color:var(--text-muted); font-size:16px; cursor:pointer; line-height:1; padding:2px; }
+
+  .note-blocks { display:flex; flex-direction:column; gap:14px; }
+  .note-block { display:flex; flex-direction:column; gap:8px; background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius); padding:12px; }
+  .note-block-header { display:flex; align-items:center; justify-content:space-between; }
+  .note-block-label { font-size:12.5px; font-weight:600; color:var(--text-muted); }
+  .note-block-del { border:none; background:transparent; color:var(--text-muted); font-size:12.5px; cursor:pointer; text-decoration:underline; padding:2px; }
+  .note-block-upload-btn { align-self:flex-start; }
   .upload-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:10px 14px; border:1px dashed var(--border); border-radius:var(--radius-sm); font-size:13px; cursor:pointer; color:var(--text-muted); width:fit-content; }
   .upload-btn:hover { border-color: var(--primary); color: var(--primary); }
 
@@ -236,6 +243,7 @@
   .badge-med-taken { background: var(--med-taken-bg); color: var(--med-taken); border-color:var(--med-taken); }
   .badge-med-skipped { background: var(--med-skipped-bg); color: var(--med-skipped); border-color:var(--med-skipped); }
   .feed-note { font-size:14px; line-height:1.6; white-space:pre-wrap; margin:8px 0; }
+  .feed-note-block + .feed-note-block { margin-top:10px; padding-top:10px; border-top:1px dashed var(--border); }
   .feed-media-grid { display:grid; grid-template-columns: repeat(2,1fr); gap:10px; margin:8px 0; }
   .feed-media-cell { display:flex; flex-direction:column; gap:4px; }
   .feed-media-item { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:8px; cursor:pointer; background:#000; }
@@ -245,10 +253,15 @@
   .feed-sentinel { text-align:center; padding:20px; font-size:13px; color: var(--text-muted); }
   .feed-empty { text-align:center; padding:60px 20px; color:var(--text-muted); font-size:14px; }
 
-  #lightbox { background: rgba(0,0,0,.85); }
-  .lightbox-content { max-width:92vw; max-height:82vh; }
+  /* 画面幅に関わらず縦中央に表示する（.modal-overlayの初期値はスマホ幅でボトムシート用のflex-end） */
+  #lightbox { background: rgba(0,0,0,.85); align-items:center; }
+  .lightbox-content { max-width:92vw; max-height:82vh; overflow:visible; }
   .lightbox-content img, .lightbox-content video { max-width:92vw; max-height:82vh; border-radius:8px; display:block; }
-  .lightbox-caption { color:#fff; font-size:14px; line-height:1.6; text-align:center; margin-top:12px; max-width:92vw; }
+  /* ピンチ操作中にブラウザ標準の拡大・スクロールと競合して表示が崩れないようにする */
+  .lightbox-content img { touch-action:none; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; cursor:zoom-in; }
+  .lightbox-content img.is-zoomed { cursor:grab; }
+  .lightbox-caption { color:#fff; font-size:14px; line-height:1.6; text-align:center; margin-top:12px; max-width:92vw; transition:opacity .15s ease; }
+  .lightbox-caption.is-hidden { opacity:0; pointer-events:none; }
   .lightbox-close { position:absolute; top:16px; right:16px; color:#fff; font-size:28px; background:transparent; border:none; cursor:pointer; }
 
   .toast {
@@ -345,16 +358,9 @@
       </div>
 
       <div class="field-group">
-        <label class="field-label" for="note-textarea">📝 メモ</label>
-        <textarea id="note-textarea" rows="4" placeholder="今日の記録を書く..."></textarea>
-      </div>
-
-      <div class="field-group">
-        <label class="field-label">🖼 写真・動画</label>
-        <div id="attachment-list" class="attachment-list"></div>
-        <label class="upload-btn">＋ 追加する
-          <input type="file" id="attachment-input" accept="image/*,video/*" multiple hidden>
-        </label>
+        <label class="field-label">📝 メモ・写真</label>
+        <div id="note-blocks" class="note-blocks"></div>
+        <button id="btn-add-note-block" class="upload-btn" type="button">＋ メモを追加</button>
       </div>
 
       <div class="field-group">
@@ -541,8 +547,12 @@ function computeShiftHours(startStr, endStr, breakMin) {
 /* =========================================================
    IndexedDB データ層
    entries: { date(PK), medication（旧形式・1日1つの一括フラグ。互換のため読み取りのみ残す）,
-              medStatus{ [medicationId]: 'taken'|'skipped' }（薬ごとの服薬記録）, note, shifts[], hasMedia }
-   media:   { id(PK,auto), date(index), type, mime, name, blob, createdAt, caption（その写真・動画単体へのコメント・任意） }
+              medStatus{ [medicationId]: 'taken'|'skipped' }（薬ごとの服薬記録）,
+              note（メインのメモ）, extraNotes[{id,text,createdAt}]（同じ日に追加した別枠のメモ）,
+              shifts[], hasMedia }
+   media:   { id(PK,auto), date(index), type, mime, name, blob, createdAt,
+              caption（その写真・動画単体へのコメント・任意）,
+              noteId（どのメモ枠に属すか。null/未設定はメインのメモ）}
    jobs:    { id(PK,auto), name, hourlyWage, color, allowances[{name,amount,type:'monthly'|'perShift'}],
               defaultStart, defaultEnd, defaultBreakMin（いつものシフト時間・任意）, createdAt }
    medications: { id(PK,auto), name, unit, dailyDose, stockQuantity, stockDate, createdAt }
@@ -780,7 +790,103 @@ function openLightbox(url, type, caption) {
     : `<img src="${url}" alt="添付メディア">`;
   const captionHtml = caption ? `<div class="lightbox-caption">${escapeHtml(caption)}</div>` : '';
   content.innerHTML = mediaHtml + captionHtml;
+  lbZoom = { scale: 1, x: 0, y: 0 };
+  if (type !== 'video') {
+    const img = content.querySelector('img');
+    if (img) setupLightboxZoomHandlers(img);
+  }
   showModal('lightbox');
+}
+
+/* 画像を指でつまんで拡大・縮小／ドラッグで移動／ダブルタップで拡大切り替えできるようにする。
+   （枠からはみ出したり中心がズレたりして「ぐちゃぐちゃ」に見えないよう、倍率は1〜4倍・移動量は画像の範囲内にクランプする） */
+let lbZoom = { scale: 1, x: 0, y: 0 };
+function applyLightboxZoom(img) {
+  img.style.transform = `translate(${lbZoom.x}px, ${lbZoom.y}px) scale(${lbZoom.scale})`;
+  const zoomed = lbZoom.scale > 1.02;
+  img.classList.toggle('is-zoomed', zoomed);
+  const caption = document.querySelector('#lightbox .lightbox-caption');
+  if (caption) caption.classList.toggle('is-hidden', zoomed);
+}
+function clampLightboxPan(img) {
+  const w = img.offsetWidth, h = img.offsetHeight;
+  const maxX = Math.max(0, (w * lbZoom.scale - w) / 2);
+  const maxY = Math.max(0, (h * lbZoom.scale - h) / 2);
+  lbZoom.x = Math.min(maxX, Math.max(-maxX, lbZoom.x));
+  lbZoom.y = Math.min(maxY, Math.max(-maxY, lbZoom.y));
+}
+function toggleLightboxZoom(img) {
+  const zoomingIn = lbZoom.scale <= 1.02;
+  lbZoom = { scale: zoomingIn ? 2.5 : 1, x: 0, y: 0 };
+  img.style.transition = 'transform .2s ease';
+  applyLightboxZoom(img);
+  setTimeout(() => { img.style.transition = 'none'; }, 220);
+}
+function setupLightboxZoomHandlers(img) {
+  let pinchStartDist = 0, pinchStartScale = 1;
+  let isPanning = false, panStartX = 0, panStartY = 0, startX = 0, startY = 0;
+  let lastTapTime = 0, lastTapX = 0, lastTapY = 0;
+  const dist = (t0, t1) => Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+
+  img.addEventListener('touchstart', (e) => {
+    img.style.transition = 'none';
+    if (e.touches.length === 2) {
+      isPanning = false;
+      pinchStartDist = dist(e.touches[0], e.touches[1]);
+      pinchStartScale = lbZoom.scale;
+    } else if (e.touches.length === 1) {
+      const t = e.touches[0];
+      const now = Date.now();
+      if (now - lastTapTime < 300 && Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < 40) {
+        lastTapTime = 0;
+        isPanning = false;
+        toggleLightboxZoom(img);
+        return;
+      }
+      lastTapTime = now; lastTapX = t.clientX; lastTapY = t.clientY;
+      if (lbZoom.scale > 1.02) {
+        isPanning = true;
+        panStartX = t.clientX; panStartY = t.clientY;
+        startX = lbZoom.x; startY = lbZoom.y;
+      }
+    }
+  }, { passive: true });
+
+  img.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const d = dist(e.touches[0], e.touches[1]);
+      lbZoom.scale = Math.min(4, Math.max(1, pinchStartScale * (d / pinchStartDist)));
+      clampLightboxPan(img);
+      applyLightboxZoom(img);
+    } else if (e.touches.length === 1 && isPanning) {
+      e.preventDefault();
+      const t = e.touches[0];
+      lbZoom.x = startX + (t.clientX - panStartX);
+      lbZoom.y = startY + (t.clientY - panStartY);
+      clampLightboxPan(img);
+      applyLightboxZoom(img);
+    }
+  }, { passive: false });
+
+  img.addEventListener('touchend', () => {
+    isPanning = false;
+    if (lbZoom.scale <= 1.02 && (lbZoom.scale !== 1 || lbZoom.x !== 0 || lbZoom.y !== 0)) {
+      lbZoom = { scale: 1, x: 0, y: 0 };
+      img.style.transition = 'transform .2s ease';
+      applyLightboxZoom(img);
+      setTimeout(() => { img.style.transition = 'none'; }, 220);
+    }
+  });
+
+  img.addEventListener('dblclick', () => toggleLightboxZoom(img));
+
+  img.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    lbZoom.scale = Math.min(4, Math.max(1, lbZoom.scale - e.deltaY * 0.01));
+    clampLightboxPan(img);
+    applyLightboxZoom(img);
+  }, { passive: false });
 }
 
 /* =========================================================
@@ -962,9 +1068,10 @@ async function refreshJobsCache() {
 async function getOrCreateCurrentEntry() {
   const key = state.currentModalDate;
   let entry = await Store.getEntry(key);
-  if (!entry) entry = { date: key, medication: null, medStatus: {}, note: '', shifts: [], hasMedia: false };
+  if (!entry) entry = { date: key, medication: null, medStatus: {}, note: '', extraNotes: [], shifts: [], hasMedia: false };
   if (!entry.shifts) entry.shifts = [];
   if (!entry.medStatus) entry.medStatus = {};
+  if (!entry.extraNotes) entry.extraNotes = [];
   return entry;
 }
 // 同じ日の記録に対する「取得→変更→保存」を直列化するための簡易ロック。
@@ -990,7 +1097,10 @@ function getMedStatusForDay(entry, medId) {
 }
 function isEntryEmpty(entry) {
   const hasMedStatus = entry.medStatus && Object.keys(entry.medStatus).length > 0;
-  return !entry.medication && !hasMedStatus && !(entry.note && entry.note.trim()) && (!entry.shifts || entry.shifts.length === 0) && !entry.hasMedia;
+  // 追加メモは「＋メモを追加」で明示的に作られた枠なので、中身がまだ空でも1件でもあれば「空ではない」扱いにする
+  // （そうしないと、空の枠を保存できず、そこに写真だけ先に追加したときに紐付け先が消えてしまう）
+  const hasExtraNoteBlocks = entry.extraNotes && entry.extraNotes.length > 0;
+  return !entry.medication && !hasMedStatus && !(entry.note && entry.note.trim()) && !hasExtraNoteBlocks && (!entry.shifts || entry.shifts.length === 0) && !entry.hasMedia;
 }
 async function saveEntry(entry) {
   if (isEntryEmpty(entry)) await Store.deleteEntry(entry.date);
@@ -1014,10 +1124,9 @@ async function openDayModal(key) {
 
   const meds = await Store.getAllMedications();
   renderMedStatusList(entry, meds);
-  document.getElementById('note-textarea').value = entry.note || '';
 
   currentDayMedia = await Store.getMediaForDate(key);
-  renderAttachmentList();
+  renderNoteBlocks(entry);
 
   await refreshJobsCache();
   populateJobSelect();
@@ -1070,17 +1179,110 @@ document.getElementById('med-status-list').addEventListener('click', async (e) =
   });
 });
 
-let noteDebounceTimer = null;
-document.getElementById('note-textarea').addEventListener('input', (e) => {
-  clearTimeout(noteDebounceTimer);
-  const val = e.target.value;
-  noteDebounceTimer = setTimeout(() => saveCurrentEntryField('note', val), 500);
-});
+// メモ1件を識別するための簡易ID（IndexedDBの主キーではなく、entry.extraNotes配列内の要素を区別するためのもの）
+function newBlockId() {
+  return 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
 
-function renderAttachmentList() {
-  const list = document.getElementById('attachment-list');
-  list.innerHTML = '';
-  for (const m of currentDayMedia) {
+// その日のメモを、メイン(entry.note)＋追加分(entry.extraNotes[])すべて枠分けして描画する。
+// 各メモ枠は、そのメモに紐づく写真・動画（media.noteId）を自分の枠の中だけに表示する。
+function renderNoteBlocks(entry) {
+  const container = document.getElementById('note-blocks');
+  container.innerHTML = '';
+  const mainMedia = currentDayMedia.filter(m => !m.noteId);
+  container.appendChild(buildNoteBlockEl(null, entry.note || '', mainMedia, false));
+  (entry.extraNotes || []).forEach(nb => {
+    const media = currentDayMedia.filter(m => m.noteId === nb.id);
+    container.appendChild(buildNoteBlockEl(nb.id, nb.text || '', media, true));
+  });
+}
+
+function buildNoteBlockEl(noteId, text, media, removable) {
+  const block = document.createElement('div');
+  block.className = 'note-block';
+
+  const header = document.createElement('div');
+  header.className = 'note-block-header';
+  header.innerHTML = `<span class="note-block-label">📝 メモ</span>`;
+  if (removable) {
+    const delBtn = document.createElement('button');
+    delBtn.className = 'note-block-del';
+    delBtn.type = 'button';
+    delBtn.textContent = 'このメモを削除';
+    delBtn.addEventListener('click', async () => {
+      if (!confirm('このメモと、添付した写真・動画を削除します。よろしいですか？')) return;
+      const mediaToDelete = currentDayMedia.filter(m => m.noteId === noteId);
+      for (const m of mediaToDelete) await Store.deleteMedia(m.id);
+      currentDayMedia = currentDayMedia.filter(m => m.noteId !== noteId);
+      await withEntryLock(async () => {
+        const entry = await getOrCreateCurrentEntry();
+        entry.extraNotes = (entry.extraNotes || []).filter(nb => nb.id !== noteId);
+        entry.hasMedia = currentDayMedia.length > 0;
+        await saveEntry(entry);
+        renderNoteBlocks(entry);
+      });
+    });
+    header.appendChild(delBtn);
+  }
+  block.appendChild(header);
+
+  const textarea = document.createElement('textarea');
+  textarea.rows = 3;
+  textarea.placeholder = '今日の記録を書く...';
+  textarea.value = text;
+  let noteDebounce = null;
+  textarea.addEventListener('input', (e) => {
+    const val = e.target.value;
+    clearTimeout(noteDebounce);
+    noteDebounce = setTimeout(() => {
+      withEntryLock(async () => {
+        const entry = await getOrCreateCurrentEntry();
+        if (noteId === null) {
+          entry.note = val;
+        } else {
+          entry.extraNotes = entry.extraNotes || [];
+          const nb = entry.extraNotes.find(x => x.id === noteId);
+          if (nb) nb.text = val;
+        }
+        await saveEntry(entry);
+      });
+    }, 500);
+  });
+  block.appendChild(textarea);
+
+  const attachList = document.createElement('div');
+  attachList.className = 'attachment-list';
+  block.appendChild(attachList);
+  renderAttachmentItemsInto(attachList, media);
+
+  const uploadLabel = document.createElement('label');
+  uploadLabel.className = 'upload-btn note-block-upload-btn';
+  uploadLabel.innerHTML = '＋ 写真・動画を追加<input type="file" accept="image/*,video/*" multiple hidden>';
+  uploadLabel.querySelector('input').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    for (const file of files) {
+      const type = file.type.startsWith('video') ? 'video' : 'image';
+      const record = { date: state.currentModalDate, type, mime: file.type, name: file.name, blob: file, createdAt: Date.now(), caption: '', noteId };
+      const id = await Store.addMedia(record);
+      currentDayMedia.push({ ...record, id });
+    }
+    renderAttachmentItemsInto(attachList, currentDayMedia.filter(m => (m.noteId || null) === noteId));
+    await withEntryLock(async () => {
+      const entry = await getOrCreateCurrentEntry();
+      entry.hasMedia = true;
+      await saveEntry(entry);
+    });
+    e.target.value = '';
+  });
+  block.appendChild(uploadLabel);
+
+  return block;
+}
+
+function renderAttachmentItemsInto(listEl, mediaList) {
+  listEl.innerHTML = '';
+  for (const m of mediaList) {
     const url = URL.createObjectURL(m.blob);
     const item = document.createElement('div');
     item.className = 'attachment-item';
@@ -1093,7 +1295,7 @@ function renderAttachmentList() {
       ev.stopPropagation();
       await Store.deleteMedia(m.id);
       currentDayMedia = currentDayMedia.filter(x => x.id !== m.id);
-      renderAttachmentList();
+      item.remove();
       await withEntryLock(async () => {
         const entry = await getOrCreateCurrentEntry();
         entry.hasMedia = currentDayMedia.length > 0;
@@ -1109,25 +1311,19 @@ function renderAttachmentList() {
         await Store.updateMediaCaption(m.id, val);
       }, 500);
     });
-    list.appendChild(item);
+    listEl.appendChild(item);
   }
 }
-document.getElementById('attachment-input').addEventListener('change', async (e) => {
-  const files = Array.from(e.target.files || []);
-  if (!files.length) return;
-  for (const file of files) {
-    const type = file.type.startsWith('video') ? 'video' : 'image';
-    const record = { date: state.currentModalDate, type, mime: file.type, name: file.name, blob: file, createdAt: Date.now(), caption: '' };
-    const id = await Store.addMedia(record);
-    currentDayMedia.push({ ...record, id });
-  }
-  renderAttachmentList();
+
+document.getElementById('btn-add-note-block').addEventListener('click', async () => {
+  const newId = newBlockId();
   await withEntryLock(async () => {
     const entry = await getOrCreateCurrentEntry();
-    entry.hasMedia = true;
+    entry.extraNotes = entry.extraNotes || [];
+    entry.extraNotes.push({ id: newId, text: '', createdAt: Date.now() });
     await saveEntry(entry);
+    renderNoteBlocks(entry);
   });
-  e.target.value = '';
 });
 
 document.getElementById('btn-delete-day').addEventListener('click', async () => {
@@ -1602,25 +1798,35 @@ const Feed = {
   }
 };
 
+function renderFeedMediaGrid(media) {
+  if (!media.length) return '';
+  return '<div class="feed-media-grid">' + media.map(m => {
+    const url = URL.createObjectURL(m.blob);
+    const captionAttr = escapeHtml(m.caption || '');
+    const mediaTag = m.type === 'video'
+      ? `<video src="${url}" class="feed-media-item" data-type="video" data-caption="${captionAttr}" muted></video>`
+      : `<img src="${url}" class="feed-media-item" data-type="image" data-caption="${captionAttr}" alt="添付画像">`;
+    const captionHtml = m.caption ? `<div class="feed-media-caption">${escapeHtml(m.caption)}</div>` : '';
+    return `<div class="feed-media-cell">${mediaTag}${captionHtml}</div>`;
+  }).join('') + '</div>';
+}
+// メモ1件（テキスト＋そのメモに紐づく写真・動画）を1つの枠として描画する。テキストも写真も無ければ何も出さない。
+function renderFeedNoteBlock(text, media) {
+  const hasText = text && text.trim();
+  if (!hasText && !media.length) return '';
+  const noteHtml = hasText ? `<p class="feed-note">${escapeHtml(text)}</p>` : '';
+  return `<div class="feed-note-block">${noteHtml}${renderFeedMediaGrid(media)}</div>`;
+}
+
 async function buildFeedCard(entry, meds) {
   const card = document.createElement('article');
   card.className = 'feed-card';
 
-  let mediaHtml = '';
-  if (entry.hasMedia) {
-    const media = await Store.getMediaForDate(entry.date);
-    if (media.length) {
-      mediaHtml = '<div class="feed-media-grid">' + media.map(m => {
-        const url = URL.createObjectURL(m.blob);
-        const captionAttr = escapeHtml(m.caption || '');
-        const mediaTag = m.type === 'video'
-          ? `<video src="${url}" class="feed-media-item" data-type="video" data-caption="${captionAttr}" muted></video>`
-          : `<img src="${url}" class="feed-media-item" data-type="image" data-caption="${captionAttr}" alt="添付画像">`;
-        const captionHtml = m.caption ? `<div class="feed-media-caption">${escapeHtml(m.caption)}</div>` : '';
-        return `<div class="feed-media-cell">${mediaTag}${captionHtml}</div>`;
-      }).join('') + '</div>';
-    }
-  }
+  const media = entry.hasMedia ? await Store.getMediaForDate(entry.date) : [];
+  const mainMedia = media.filter(m => !m.noteId);
+  const noteBlocksHtml = [renderFeedNoteBlock(entry.note, mainMedia)]
+    .concat((entry.extraNotes || []).map(nb => renderFeedNoteBlock(nb.text, media.filter(m => m.noteId === nb.id))))
+    .join('');
 
   let medBadge = '';
   if (meds && meds.length) {
@@ -1649,8 +1855,7 @@ async function buildFeedCard(entry, meds) {
       <button class="feed-edit-btn" type="button">編集</button>
     </div>
     ${medBadge ? `<div class="feed-badges">${medBadge}</div>` : ''}
-    ${entry.note ? `<p class="feed-note">${escapeHtml(entry.note)}</p>` : ''}
-    ${mediaHtml}
+    ${noteBlocksHtml}
     ${shiftsHtml}
   `;
 
@@ -1696,7 +1901,7 @@ document.getElementById('btn-export').addEventListener('click', async () => {
       Store.getAllJobs(), Store.getAllEntries(), Store.getAllMedia(), Store.getAllMedications()
     ]);
     const zip = new JSZip();
-    const mediaMeta = media.map(m => ({ id: m.id, date: m.date, type: m.type, mime: m.mime, name: m.name, createdAt: m.createdAt, caption: m.caption || '' }));
+    const mediaMeta = media.map(m => ({ id: m.id, date: m.date, type: m.type, mime: m.mime, name: m.name, createdAt: m.createdAt, caption: m.caption || '', noteId: m.noteId || null }));
     const dataJson = { version: 2, exportedAt: new Date().toISOString(), jobs, entries, mediaMeta, medications };
     zip.file('data.json', JSON.stringify(dataJson, null, 2));
     const mediaFolder = zip.folder('media');
@@ -1745,7 +1950,7 @@ document.getElementById('import-input').addEventListener('change', async (e) => 
       const zf = zip.file(`media/${meta.id}.${ext}`);
       if (!zf) continue;
       const blob = await zf.async('blob');
-      await Store.putMediaRaw({ id: meta.id, date: meta.date, type: meta.type, mime: meta.mime, name: meta.name, blob, createdAt: meta.createdAt, caption: meta.caption || '' });
+      await Store.putMediaRaw({ id: meta.id, date: meta.date, type: meta.type, mime: meta.mime, name: meta.name, blob, createdAt: meta.createdAt, caption: meta.caption || '', noteId: meta.noteId || null });
     }
 
     await refreshJobsCache();
