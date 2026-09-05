@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#2f7a6f">
-<meta name="description" content="服薬・日々のメモ・バイトのシフトと給与を記録できるカレンダーアプリ">
+<meta name="description" content="服薬・日々のメモ・お仕事のシフトと給与（時給制・月給制）を記録できるカレンダーアプリ">
 <title>きろくカレンダー</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%85%3C/text%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.json">
@@ -168,6 +168,8 @@
   .shift-form { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
   .shift-form select { flex-basis:100%; }
   .shift-form input[type="time"] { width:auto; flex:1; min-width:90px; }
+  #shift-time-fields { display:flex; flex-wrap:wrap; align-items:center; gap:6px; flex-basis:100%; }
+  #shift-time-fields[hidden] { display:none; }
   .break-label { display:flex; align-items:center; gap:4px; font-size:12px; color:var(--text-muted); white-space:nowrap; }
   .break-label input { width:56px; }
   .add-shift-btn, .primary-btn { background: var(--primary); color:var(--primary-fg); border:none; border-radius:var(--radius-sm); padding:10px 16px; font-size:13px; font-weight:600; cursor:pointer; }
@@ -179,6 +181,21 @@
   .settings-section { display:flex; flex-direction:column; gap:10px; }
   .settings-section-title { font-size:14px; margin:0; font-family: var(--font-display); font-weight:700; }
   .settings-divider { width:100%; border:none; border-top:1px solid var(--border); margin:4px 0; }
+
+  .settings-toggle-row { display:flex; align-items:center; gap:10px; }
+  .toggle-switch { position:relative; display:inline-block; width:44px; height:26px; flex-shrink:0; }
+  .toggle-switch input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; }
+  .toggle-slider { position:absolute; inset:0; background:var(--border); border-radius:999px; transition:background .15s ease; pointer-events:none; }
+  .toggle-slider::before { content:''; position:absolute; width:20px; height:20px; left:3px; top:3px; background:#fff; border-radius:50%; transition:transform .15s ease; box-shadow:0 1px 2px rgba(0,0,0,.25); }
+  .toggle-switch input:checked + .toggle-slider { background:var(--primary); }
+  .toggle-switch input:checked + .toggle-slider::before { transform:translateX(18px); }
+  .toggle-switch input:focus-visible + .toggle-slider { outline:2px solid var(--primary); outline-offset:2px; }
+  .toggle-label-text { font-size:14px; font-weight:600; }
+
+  body.work-disabled #job-field-group,
+  body.work-disabled #salary-summary,
+  body.work-disabled .legend-item-work,
+  body.work-disabled #job-settings-body { display:none; }
 
   .theme-swatches { display:flex; flex-wrap:wrap; gap:10px; }
   .theme-swatch { width:34px; height:34px; border-radius:50%; border:none; cursor:pointer; padding:0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); opacity:.55; transition:opacity .15s ease, transform .15s ease; }
@@ -205,6 +222,9 @@
   .cancel-edit-btn { border:none; background:transparent; color:var(--text-muted); font-size:13px; cursor:pointer; text-decoration:underline; }
   .job-form { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   .job-form input { flex:1; min-width:120px; }
+  .job-paytype-row { display:flex; gap:6px; margin:0; flex-basis:100%; background:var(--bg-elevated); padding:4px; border-radius:999px; border:1px solid var(--border); }
+  .job-paytype-btn { flex:1; padding:10px 12px; border:none; background:transparent; border-radius:999px; font-size:14px; font-weight:600; color:var(--text-muted); cursor:pointer; }
+  .job-paytype-btn.active { background: var(--primary); color:var(--primary-fg); }
   .color-picker { display:flex; gap:6px; flex-wrap:wrap; width:100%; }
   .color-swatch { width:24px; height:24px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
   .color-swatch.selected { border-color: var(--text); }
@@ -345,7 +365,7 @@
       <button id="btn-backup" class="icon-btn" title="バックアップ" aria-label="バックアップ">
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 15.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/></svg>
       </button>
-      <button id="btn-settings" class="icon-btn" title="バイト設定" aria-label="バイト設定">
+      <button id="btn-settings" class="icon-btn" title="お仕事の設定" aria-label="お仕事の設定">
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1M18.5 18.5l-2.1-2.1M7.6 7.6 5.5 5.5"/></svg>
       </button>
     </div>
@@ -381,7 +401,7 @@
         <span class="legend-item"><span class="dot dot-med-taken"></span>服薬した</span>
         <span class="legend-item"><span class="dot dot-med-skipped"></span>服薬しなかった</span>
         <span class="legend-item"><span class="dot dot-note"></span>メモ・写真</span>
-        <span class="legend-item"><span class="dot dot-shift"></span>バイト</span>
+        <span class="legend-item legend-item-work"><span class="dot dot-shift"></span>勤務</span>
       </div>
     </section>
 
@@ -413,18 +433,20 @@
         <button id="btn-add-note-block" class="upload-btn" type="button">＋ メモを追加</button>
       </div>
 
-      <div class="field-group">
-        <label class="field-label">💼 バイトシフト</label>
+      <div class="field-group" id="job-field-group">
+        <label class="field-label">💼 お仕事</label>
         <div id="shift-list" class="shift-list"></div>
         <div class="shift-form" id="shift-form">
           <select id="shift-job-select"></select>
-          <input type="time" id="shift-start" value="09:00">
-          <span>〜</span>
-          <input type="time" id="shift-end" value="17:00">
-          <label class="break-label">休憩<input type="number" id="shift-break" min="0" step="5" value="0">分</label>
+          <div id="shift-time-fields">
+            <input type="time" id="shift-start" value="09:00">
+            <span>〜</span>
+            <input type="time" id="shift-end" value="17:00">
+            <label class="break-label">休憩<input type="number" id="shift-break" min="0" step="5" value="0">分</label>
+          </div>
           <button id="btn-add-shift" class="add-shift-btn" type="button">追加</button>
         </div>
-        <p id="shift-empty-hint" class="hint-text">バイト先が未登録です。右上の⚙️設定から追加してください。</p>
+        <p id="shift-empty-hint" class="hint-text">勤務先が未登録です。右上の⚙️設定から追加してください。</p>
       </div>
 
       <button id="btn-delete-day" class="danger-btn" type="button">この日の記録を削除</button>
@@ -482,30 +504,46 @@
       <hr class="settings-divider">
 
       <section class="settings-section">
-        <h3 class="settings-section-title">バイト設定</h3>
-        <div id="job-list" class="job-list"></div>
-        <div class="job-form">
-          <input type="text" id="job-name-input" placeholder="バイト先名（例：コンビニA）">
-          <input type="number" id="job-wage-input" placeholder="時給（円）" min="0" step="10">
-          <div class="color-picker" id="job-color-picker"></div>
+        <h3 class="settings-section-title">💼 お仕事の設定</h3>
+        <div class="settings-toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-work-enabled" checked>
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label-text">お仕事の記録を使う</span>
         </div>
-        <div class="job-default-shift-form">
-          <span class="hint-text">いつものシフト時間（任意）。設定すると、このバイト先を選んだときにシフト登録の時刻へ自動で入力されます</span>
-          <div class="job-default-shift-row">
-            <input type="time" id="job-default-start-input" aria-label="いつもの開始時刻">
-            <span>〜</span>
-            <input type="time" id="job-default-end-input" aria-label="いつもの終了時刻">
-            <label class="break-label">休憩<input type="number" id="job-default-break-input" min="0" step="5" placeholder="0" aria-label="いつもの休憩時間">分</label>
+        <p class="hint-text">オフにすると、カレンダーやメモの画面からお仕事に関する表示が消えます。登録した勤務先やこれまでの記録は消えず、オンに戻すといつでも元通りに表示されます。</p>
+        <div id="job-settings-body">
+          <div id="job-list" class="job-list"></div>
+          <div class="job-form">
+            <input type="text" id="job-name-input" placeholder="勤務先名（例：コンビニA／株式会社◯◯）">
+            <div id="job-paytype-row" class="job-paytype-row">
+              <button type="button" class="job-paytype-btn" data-paytype="hourly">時給制</button>
+              <button type="button" class="job-paytype-btn" data-paytype="monthly">月給制</button>
+            </div>
+            <input type="number" id="job-wage-input" placeholder="時給（円）" min="0" step="10">
+            <input type="number" id="job-monthly-salary-input" placeholder="月給（円）" min="0" step="1000" hidden>
+            <div class="color-picker" id="job-color-picker"></div>
           </div>
-        </div>
-        <div class="job-allowance-form">
-          <span class="hint-text">手当（交通費・食事補助など・任意）。行ごとに「月1回」（その月に出勤が1回でもあれば1回だけ加算）か「出勤ごと」（シフトを1件登録するたびに加算）を選べます</span>
-          <div id="job-allowance-rows" class="job-allowance-rows"></div>
-          <button id="btn-add-allowance-row" class="allowance-add-btn" type="button">＋ 手当を追加</button>
-        </div>
-        <div class="job-form-actions">
-          <button id="btn-add-job" class="add-shift-btn" type="button">バイト先を追加</button>
-          <button id="btn-cancel-edit-job" class="cancel-edit-btn" type="button" hidden>キャンセル</button>
+          <div id="job-default-shift-form" class="job-default-shift-form">
+            <span class="hint-text">いつものシフト時間（任意）。設定すると、この勤務先を選んだときにシフト登録の時刻へ自動で入力されます</span>
+            <div class="job-default-shift-row">
+              <input type="time" id="job-default-start-input" aria-label="いつもの開始時刻">
+              <span>〜</span>
+              <input type="time" id="job-default-end-input" aria-label="いつもの終了時刻">
+              <label class="break-label">休憩<input type="number" id="job-default-break-input" min="0" step="5" placeholder="0" aria-label="いつもの休憩時間">分</label>
+            </div>
+          </div>
+          <p id="job-monthly-hint" class="hint-text" hidden>月給制は毎月の基本給を固定額で記録します。出退勤の時刻入力は不要です。記録モードで「出勤した」を記録した月だけ、その月の給与として基本給が計上されます。</p>
+          <div class="job-allowance-form">
+            <span class="hint-text">手当（交通費・食事補助など・任意）。行ごとに「月1回」（その月に出勤が1回でもあれば1回だけ加算）か「出勤ごと」（シフトを1件登録するたびに加算）を選べます</span>
+            <div id="job-allowance-rows" class="job-allowance-rows"></div>
+            <button id="btn-add-allowance-row" class="allowance-add-btn" type="button">＋ 手当を追加</button>
+          </div>
+          <div class="job-form-actions">
+            <button id="btn-add-job" class="add-shift-btn" type="button">勤務先を追加</button>
+            <button id="btn-cancel-edit-job" class="cancel-edit-btn" type="button" hidden>キャンセル</button>
+          </div>
         </div>
       </section>
     </div>
@@ -664,6 +702,30 @@ async function initTheme() {
   applyTheme(settings);
   return settings;
 }
+
+/* =========================================================
+   機能のオン/オフ（お仕事の表示）
+   バイトをしていない・お仕事の記録が不要な人向けに、関連する表示だけをまとめて隠せるようにする。
+   オフにしてもデータ（勤務先・記録）自体は消さず、非表示にするだけ。オンに戻せば元通り表示される。
+   ========================================================= */
+function applyWorkVisibility(features) {
+  state.workEnabled = !features || features.workEnabled !== false; // 未設定時はON（デフォルト）扱い
+  document.body.classList.toggle('work-disabled', !state.workEnabled);
+  const toggle = document.getElementById('toggle-work-enabled');
+  if (toggle) toggle.checked = state.workEnabled;
+}
+async function initFeatures() {
+  const features = await Store.getFeatureSettings();
+  applyWorkVisibility(features);
+  return features;
+}
+document.getElementById('toggle-work-enabled').addEventListener('change', async (e) => {
+  const workEnabled = e.target.checked;
+  await Store.putFeatureSettings({ workEnabled });
+  applyWorkVisibility({ workEnabled });
+  await renderCalendar();
+  if (state.mode === 'view') { Feed.reset(); Feed.initIfNeeded(); }
+});
 // 設定モーダルのプレビュー用に、最後にrenderThemeSection()で読み込んだ設定を覚えておく
 // （カスタムカラーのinputイベントのたびにDBへ読みに行かなくて済むようにするため）
 let currentThemeSettings = { accentColor: DEFAULT_ACCENT, mode: 'system' };
@@ -737,12 +799,17 @@ function computeShiftHours(startStr, endStr, breakMin) {
               medStatus{ [medicationId]: 'taken'|'skipped' }（薬ごとの服薬記録・タイミング未設定の薬用）,
               medTimingStatus{ [medicationId]: { [timingId]: 'taken'|'skipped' } }（薬×タイミングごとの服薬記録）,
               note（メインのメモ）, extraNotes[{id,text,createdAt}]（同じ日に追加した別枠のメモ）,
-              shifts[], hasMedia }
+              shifts[{jobId,jobName,color,payType:'hourly'|'monthly'（未設定は'hourly'扱い）,
+                      start,end,breakMin,hours,pay（時給制）, monthlySalary（月給制のスナップショット。
+                      pay/hoursは0で、その月に1件でも記録があれば月給集計にmonthlySalaryを1回だけ計上する）}],
+              hasMedia }
    media:   { id(PK,auto), date(index), type, mime, name, blob, createdAt,
               caption（その写真・動画単体へのコメント・任意）,
               noteId（どのメモ枠に属すか。null/未設定はメインのメモ）}
-   jobs:    { id(PK,auto), name, hourlyWage, color, allowances[{name,amount,type:'monthly'|'perShift'}],
-              defaultStart, defaultEnd, defaultBreakMin（いつものシフト時間・任意）, createdAt }
+   jobs:    { id(PK,auto), name, color, allowances[{name,amount,type:'monthly'|'perShift'}],
+              payType:'hourly'|'monthly'（未設定は'hourly'扱い・給与形態）,
+              hourlyWage（時給制で使用）, monthlySalary（月給制で使用）,
+              defaultStart, defaultEnd, defaultBreakMin（いつものシフト時間・任意・時給制のみ）, createdAt }
    medications: { id(PK,auto), name, unit, dailyDose, stockQuantity, stockDate, createdAt,
                   timings[{id,label}]（飲むタイミング。朝・夜など。未設定なら従来通り1日1回のチェックのみ）}
    settings: { key(PK) 'appearance', accentColor, mode:'system'|'light'|'dark' }（サイト全体のテーマ設定）
@@ -954,6 +1021,19 @@ const Store = {
     const t = db.transaction('settings', 'readwrite');
     t.objectStore('settings').put({ key: 'appearance', accentColor: settings.accentColor, mode: settings.mode });
     return txDone(t);
+  },
+  // 機能のオン/オフ設定（現状は「お仕事」表示のみ）。こちらもテーマ設定と同じ理由でclearAll()の対象外。
+  async getFeatureSettings() {
+    const db = await getDB();
+    const t = db.transaction('settings', 'readonly');
+    const rec = await reqToPromise(t.objectStore('settings').get('features'));
+    return rec || { key: 'features', workEnabled: true };
+  },
+  async putFeatureSettings(features) {
+    const db = await getDB();
+    const t = db.transaction('settings', 'readwrite');
+    t.objectStore('settings').put({ key: 'features', workEnabled: features.workEnabled !== false });
+    return txDone(t);
   }
 };
 
@@ -962,7 +1042,8 @@ const Store = {
    ========================================================= */
 const JOB_COLORS = ['#c1892f', '#3d7ea6', '#a65a56', '#5f9e6f', '#7c6a9c', '#4a8b83', '#b0793f', '#6b7fa0'];
 let selectedJobColor = JOB_COLORS[0];
-let editingJobId = null; // nullなら新規追加モード、値があればそのidのバイト先を編集中
+let selectedJobPayType = 'hourly'; // 'hourly'(時給制) | 'monthly'(月給制)。勤務先追加フォームで選択中の給与形態
+let editingJobId = null; // nullなら新規追加モード、値があればそのidの勤務先を編集中
 
 const state = {
   year: new Date().getFullYear(),
@@ -970,6 +1051,7 @@ const state = {
   currentModalDate: null,
   jobsCache: [],
   mode: 'record',
+  workEnabled: true, // 「お仕事」機能のオン/オフ（設定 ⚙️ から切り替え可能）
 };
 
 function showModal(id) {
@@ -1180,7 +1262,7 @@ async function renderCalendar() {
       if (showMedTaken) dotsEl.appendChild(makeDot('dot-med-taken'));
       if (showMedSkipped) dotsEl.appendChild(makeDot('dot-med-skipped'));
       if ((entry.note && entry.note.trim()) || entry.hasMedia) dotsEl.appendChild(makeDot('dot-note'));
-      if (entry.shifts && entry.shifts.length) {
+      if (state.workEnabled && entry.shifts && entry.shifts.length) {
         const shiftDot = makeDot('dot-shift');
         shiftDot.style.background = entry.shifts[0].color || 'var(--shift-color)';
         dotsEl.appendChild(shiftDot);
@@ -1201,23 +1283,31 @@ async function renderCalendar() {
 }
 
 function renderSalarySummary(entries) {
-  const totals = new Map(); // jobId -> {jobId,name,color,hours,pay,shiftCount,allowance,total}
+  // entriesはdateの昇順で渡される前提（Store.getEntriesInRangeの仕様）。
+  // 月給ジョブのスナップショットは、その月で最初に見つかった記録の金額だけを採用する
+  // （月の途中で月給額を変更してから同じ月にもう1件記録しても、すでにある月の金額が変わらないようにするため）
+  const totals = new Map(); // jobId -> {jobId,name,color,payType,hours,pay,monthlySalary,shiftCount,allowance,total}
   let grandHours = 0;
   for (const entry of entries) {
     if (!entry.shifts) continue;
     for (const s of entry.shifts) {
       const key = s.jobId + '|' + s.jobName;
-      if (!totals.has(key)) totals.set(key, { jobId: s.jobId, name: s.jobName, color: s.color, hours: 0, pay: 0, shiftCount: 0 });
+      if (!totals.has(key)) totals.set(key, { jobId: s.jobId, name: s.jobName, color: s.color, payType: 'hourly', hours: 0, pay: 0, monthlySalary: null, shiftCount: 0 });
       const t = totals.get(key);
-      t.hours += s.hours;
-      t.pay += s.pay;
       t.shiftCount += 1;
-      grandHours += s.hours;
+      if (s.payType === 'monthly') {
+        t.payType = 'monthly';
+        if (t.monthlySalary === null) t.monthlySalary = s.monthlySalary || 0;
+      } else {
+        t.hours += s.hours;
+        t.pay += s.pay;
+        grandHours += s.hours;
+      }
     }
   }
   // 手当（交通費・食事補助など）は行ごとに2種類：
-  //  - monthly:  その月に1件でもシフトがあれば、月1回だけ加算
-  //  - perShift: シフトを1件登録するたびに加算（登録件数ぶん）
+  //  - monthly:  その月に1件でも記録があれば、月1回だけ加算
+  //  - perShift: 記録を1件登録するたびに加算（登録件数ぶん）
   let grandPay = 0, grandAllowance = 0;
   for (const t of totals.values()) {
     const job = (state.jobsCache || []).find(j => j.id === t.jobId);
@@ -1226,22 +1316,24 @@ function renderSalarySummary(entries) {
       const amt = Number(a.amount) || 0;
       return sum + (a.type === 'perShift' ? amt * t.shiftCount : amt);
     }, 0);
-    t.total = t.pay + t.allowance;
+    t.total = (t.payType === 'monthly' ? (t.monthlySalary || 0) : t.pay) + t.allowance;
     grandAllowance += t.allowance;
     grandPay += t.total;
   }
 
   const el = document.getElementById('salary-summary');
   if (totals.size === 0) {
-    el.innerHTML = `<div class="salary-empty">${state.month + 1}月のバイト記録はまだありません</div>`;
+    el.innerHTML = `<div class="salary-empty">${state.month + 1}月の勤務記録はまだありません</div>`;
     return;
   }
-  let html = `<div class="salary-total"><span>${state.month + 1}月の給与合計</span><strong>${yen(grandPay)}</strong><span class="salary-hours">${grandHours.toFixed(1)}時間</span></div>`;
+  const hoursSpan = grandHours > 0 ? `<span class="salary-hours">${grandHours.toFixed(1)}時間</span>` : '';
+  let html = `<div class="salary-total"><span>${state.month + 1}月の給与合計</span><strong>${yen(grandPay)}</strong>${hoursSpan}</div>`;
   if (totals.size > 1 || grandAllowance > 0) {
     html += '<div class="salary-breakdown">';
     for (const t of totals.values()) {
       const allowanceNote = t.allowance > 0 ? `／手当${yen(t.allowance)}込み` : '';
-      html += `<div class="salary-row"><span class="job-color-dot" style="background:${t.color}"></span>${escapeHtml(t.name)}：${yen(t.total)}（${t.hours.toFixed(1)}h${allowanceNote}）</div>`;
+      const amountNote = t.payType === 'monthly' ? '月給' : `${t.hours.toFixed(1)}h`;
+      html += `<div class="salary-row"><span class="job-color-dot" style="background:${t.color}"></span>${escapeHtml(t.name)}：${yen(t.total)}（${amountNote}${allowanceNote}）</div>`;
     }
     html += '</div>';
   }
@@ -1616,21 +1708,25 @@ document.getElementById('btn-delete-day').addEventListener('click', async () => 
   toast('削除しました');
 });
 
-/* ---- シフト（バイト設定・登録） ---- */
+/* ---- シフト（お仕事の設定・記録） ---- */
 function populateJobSelect() {
   const sel = document.getElementById('shift-job-select');
   sel.innerHTML = '';
   for (const job of state.jobsCache) {
     const opt = document.createElement('option');
     opt.value = job.id;
-    opt.textContent = `${job.name}（時給${yen(job.hourlyWage)}）`;
+    opt.textContent = job.payType === 'monthly'
+      ? `${job.name}（月給${yen(job.monthlySalary)}）`
+      : `${job.name}（時給${yen(job.hourlyWage)}）`;
     sel.appendChild(opt);
   }
-  applyJobShiftDefaults(state.jobsCache.find(j => j.id === Number(sel.value)));
+  const selectedJob = state.jobsCache.find(j => j.id === Number(sel.value));
+  applyJobShiftDefaults(selectedJob);
+  updateShiftFormForJob(selectedJob);
 }
-/* バイトごとの「いつものシフト時間」を、シフト登録フォームに反映する */
+/* 勤務先ごとの「いつものシフト時間」を、シフト登録フォームに反映する（時給制のみ） */
 function applyJobShiftDefaults(job) {
-  if (!job) return;
+  if (!job || job.payType === 'monthly') return;
   const startInput = document.getElementById('shift-start');
   const endInput = document.getElementById('shift-end');
   const breakInput = document.getElementById('shift-break');
@@ -1638,8 +1734,16 @@ function applyJobShiftDefaults(job) {
   if (job.defaultEnd) endInput.value = job.defaultEnd;
   if (job.defaultBreakMin !== null && job.defaultBreakMin !== undefined) breakInput.value = job.defaultBreakMin;
 }
+/* 月給制の勤務先を選んでいる間は、出退勤の時刻入力を隠し、ボタンの文言も「出勤した」に変える */
+function updateShiftFormForJob(job) {
+  const isMonthly = !!job && job.payType === 'monthly';
+  document.getElementById('shift-time-fields').hidden = isMonthly;
+  document.getElementById('btn-add-shift').textContent = isMonthly ? '出勤した' : '追加';
+}
 document.getElementById('shift-job-select').addEventListener('change', (e) => {
-  applyJobShiftDefaults(state.jobsCache.find(j => j.id === Number(e.target.value)));
+  const job = state.jobsCache.find(j => j.id === Number(e.target.value));
+  applyJobShiftDefaults(job);
+  updateShiftFormForJob(job);
 });
 function renderShiftList(shifts) {
   const list = document.getElementById('shift-list');
@@ -1647,8 +1751,11 @@ function renderShiftList(shifts) {
   shifts.forEach((s, idx) => {
     const row = document.createElement('div');
     row.className = 'shift-row';
+    const info = s.payType === 'monthly'
+      ? `${escapeHtml(s.jobName)} ・ 出勤`
+      : `${escapeHtml(s.jobName)} ${s.start}〜${s.end}${s.breakMin ? '（休憩' + s.breakMin + '分）' : ''} ・ ${s.hours.toFixed(1)}h ・ ${yen(s.pay)}`;
     row.innerHTML = `<span class="job-color-dot" style="background:${s.color}"></span>
-      <span class="shift-info">${escapeHtml(s.jobName)} ${s.start}〜${s.end}${s.breakMin ? '（休憩' + s.breakMin + '分）' : ''} ・ ${s.hours.toFixed(1)}h ・ ${yen(s.pay)}</span>
+      <span class="shift-info">${info}</span>
       <button class="shift-del" type="button" data-idx="${idx}" aria-label="削除">×</button>`;
     list.appendChild(row);
   });
@@ -1667,20 +1774,29 @@ function renderShiftList(shifts) {
 document.getElementById('btn-add-shift').addEventListener('click', async () => {
   const jobId = Number(document.getElementById('shift-job-select').value);
   const job = state.jobsCache.find(j => j.id === jobId);
-  if (!job) { toast('バイト先を選択してください'); return; }
-  const start = document.getElementById('shift-start').value;
-  const end = document.getElementById('shift-end').value;
-  const breakMin = Number(document.getElementById('shift-break').value) || 0;
-  if (!start || !end) { toast('時刻を入力してください'); return; }
-  const hours = computeShiftHours(start, end, breakMin);
-  const pay = hours * job.hourlyWage;
+  if (!job) { toast('勤務先を選択してください'); return; }
+  const isMonthly = job.payType === 'monthly';
+  let shift;
+  if (isMonthly) {
+    // 月給制は時刻の入力なし。「出勤した」という記録を1件追加するだけでよい
+    // （その月に1件でも記録があれば、給与集計側で月給を1回だけ計上する。月給額はここでスナップショットする）
+    shift = { jobId: job.id, jobName: job.name, color: job.color, payType: 'monthly', monthlySalary: job.monthlySalary, hours: 0, pay: 0 };
+  } else {
+    const start = document.getElementById('shift-start').value;
+    const end = document.getElementById('shift-end').value;
+    const breakMin = Number(document.getElementById('shift-break').value) || 0;
+    if (!start || !end) { toast('時刻を入力してください'); return; }
+    const hours = computeShiftHours(start, end, breakMin);
+    const pay = hours * job.hourlyWage;
+    shift = { jobId: job.id, jobName: job.name, hourlyWage: job.hourlyWage, color: job.color, payType: 'hourly', start, end, breakMin, hours, pay };
+  }
   await withEntryLock(async () => {
     const entry = await getOrCreateCurrentEntry();
-    entry.shifts.push({ jobId: job.id, jobName: job.name, hourlyWage: job.hourlyWage, color: job.color, start, end, breakMin, hours, pay });
+    entry.shifts.push(shift);
     await saveEntry(entry);
     renderShiftList(entry.shifts);
   });
-  toast('シフトを追加しました');
+  toast(isMonthly ? '出勤を記録しました' : 'シフトを追加しました');
 });
 
 /* ---- 薬の在庫管理 ---- */
@@ -1942,11 +2058,12 @@ document.getElementById('btn-add-med').addEventListener('click', async () => {
   toast('薬を登録しました');
 });
 
-/* ---- バイト設定モーダル ---- */
+/* ---- お仕事設定モーダル ---- */
 document.getElementById('btn-settings').addEventListener('click', async () => {
   await renderThemeSection();
   await renderJobList();
   renderColorPicker();
+  renderJobPaytypeToggle();
   await renderMedStockList();
   const baseDateInput = document.getElementById('med-basedate-input');
   if (!baseDateInput.value) baseDateInput.value = todayKey();
@@ -2011,23 +2128,25 @@ async function renderJobList() {
   const list = document.getElementById('job-list');
   list.innerHTML = '';
   if (!jobs.length) {
-    list.innerHTML = '<p class="hint-text">まだバイト先が登録されていません</p>';
+    list.innerHTML = '<p class="hint-text">まだ勤務先が登録されていません</p>';
     return;
   }
   jobs.forEach(job => {
     const row = document.createElement('div');
     row.className = 'job-row';
+    const isMonthly = job.payType === 'monthly';
     const allowances = job.allowances || [];
     const allowanceText = allowances.length
       ? `手当：${allowances.map(a => `${escapeHtml(a.name)} ${yen(a.amount)}${a.type === 'perShift' ? '/出勤' : '/月'}`).join('・')}`
       : '';
-    const shiftDefaultText = (job.defaultStart && job.defaultEnd)
+    const shiftDefaultText = (!isMonthly && job.defaultStart && job.defaultEnd)
       ? `いつもの時間：${job.defaultStart}〜${job.defaultEnd}${job.defaultBreakMin ? '（休憩' + job.defaultBreakMin + '分）' : ''}`
       : '';
+    const wageText = isMonthly ? `月給${yen(job.monthlySalary)}` : `時給${yen(job.hourlyWage)}`;
     row.innerHTML = `<div class="job-row-top">
         <span class="job-color-dot" style="background:${job.color}"></span>
         <span class="job-row-name">${escapeHtml(job.name)}</span>
-        <span class="job-row-wage">時給${yen(job.hourlyWage)}</span>
+        <span class="job-row-wage">${wageText}</span>
         <button class="job-edit" type="button" data-id="${job.id}">編集</button>
         <button class="job-del" type="button" data-id="${job.id}">削除</button>
       </div>
@@ -2037,7 +2156,7 @@ async function renderJobList() {
   });
   list.querySelectorAll('.job-del').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('このバイト先を削除しますか？過去のシフト記録（給与計算含む）はそのまま残ります。')) return;
+      if (!confirm('この勤務先を削除しますか？過去の記録（給与計算含む）はそのまま残ります。')) return;
       await Store.deleteJob(Number(btn.dataset.id));
       if (editingJobId === Number(btn.dataset.id)) cancelJobEdit();
       await renderJobList();
@@ -2051,32 +2170,55 @@ async function renderJobList() {
     });
   });
 }
-/* バイト先の追加フォームを「新規追加」の初期状態に戻す（編集モードの解除も兼ねる） */
+/* 給与形態（時給制/月給制）に応じて、追加フォームの入力欄の表示を切り替える */
+function renderJobPaytypeToggle() {
+  document.querySelectorAll('.job-paytype-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.paytype === selectedJobPayType);
+  });
+  const isMonthly = selectedJobPayType === 'monthly';
+  document.getElementById('job-wage-input').hidden = isMonthly;
+  document.getElementById('job-monthly-salary-input').hidden = !isMonthly;
+  document.getElementById('job-default-shift-form').hidden = isMonthly;
+  document.getElementById('job-monthly-hint').hidden = !isMonthly;
+}
+document.querySelectorAll('.job-paytype-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    selectedJobPayType = btn.dataset.paytype === 'monthly' ? 'monthly' : 'hourly';
+    renderJobPaytypeToggle();
+  });
+});
+/* 勤務先の追加フォームを「新規追加」の初期状態に戻す（編集モードの解除も兼ねる） */
 function resetJobForm() {
   document.getElementById('job-name-input').value = '';
   document.getElementById('job-wage-input').value = '';
+  document.getElementById('job-monthly-salary-input').value = '';
   document.getElementById('job-default-start-input').value = '';
   document.getElementById('job-default-end-input').value = '';
   document.getElementById('job-default-break-input').value = '';
   selectedJobColor = JOB_COLORS[0];
   renderColorPicker();
+  selectedJobPayType = 'hourly';
+  renderJobPaytypeToggle();
   resetJobAllowanceRows();
   editingJobId = null;
-  document.getElementById('btn-add-job').textContent = 'バイト先を追加';
+  document.getElementById('btn-add-job').textContent = '勤務先を追加';
   document.getElementById('btn-cancel-edit-job').hidden = true;
 }
-/* 既存のバイト先を編集モードで開く：追加フォームにそのバイト先の内容を読み込む */
+/* 既存の勤務先を編集モードで開く：追加フォームにその勤務先の内容を読み込む */
 function startEditJob(job) {
   editingJobId = job.id;
   document.getElementById('job-name-input').value = job.name;
-  document.getElementById('job-wage-input').value = job.hourlyWage;
+  selectedJobPayType = job.payType === 'monthly' ? 'monthly' : 'hourly';
+  renderJobPaytypeToggle();
+  document.getElementById('job-wage-input').value = job.hourlyWage || '';
+  document.getElementById('job-monthly-salary-input').value = job.monthlySalary || '';
   document.getElementById('job-default-start-input').value = job.defaultStart || '';
   document.getElementById('job-default-end-input').value = job.defaultEnd || '';
   document.getElementById('job-default-break-input').value = job.defaultBreakMin ?? '';
   selectedJobColor = job.color;
   renderColorPicker();
   loadAllowanceRowsFrom(job.allowances);
-  document.getElementById('btn-add-job').textContent = 'バイト先を更新';
+  document.getElementById('btn-add-job').textContent = '勤務先を更新';
   document.getElementById('btn-cancel-edit-job').hidden = false;
   toast(`「${job.name}」を編集中です`);
 }
@@ -2087,30 +2229,40 @@ document.getElementById('btn-cancel-edit-job').addEventListener('click', () => c
 document.getElementById('btn-add-job').addEventListener('click', async () => {
   const nameInput = document.getElementById('job-name-input');
   const wageInput = document.getElementById('job-wage-input');
+  const monthlySalaryInput = document.getElementById('job-monthly-salary-input');
   const defaultStartInput = document.getElementById('job-default-start-input');
   const defaultEndInput = document.getElementById('job-default-end-input');
   const defaultBreakInput = document.getElementById('job-default-break-input');
   const name = nameInput.value.trim();
+  const payType = selectedJobPayType === 'monthly' ? 'monthly' : 'hourly';
   const wage = Number(wageInput.value);
-  if (!name) { toast('バイト先名を入力してください'); return; }
-  if (!wage || wage <= 0) { toast('時給を正しく入力してください'); return; }
+  const monthlySalary = Number(monthlySalaryInput.value);
+  if (!name) { toast('勤務先名を入力してください'); return; }
+  if (payType === 'hourly' && (!wage || wage <= 0)) { toast('時給を正しく入力してください'); return; }
+  if (payType === 'monthly' && (!monthlySalary || monthlySalary <= 0)) { toast('月給を正しく入力してください'); return; }
   const allowances = collectAllowanceRows();
-  const defaultStart = defaultStartInput.value || null;
-  const defaultEnd = defaultEndInput.value || null;
-  const defaultBreakMin = defaultBreakInput.value !== '' ? Number(defaultBreakInput.value) : null;
+  const existing = editingJobId ? (state.jobsCache.find(j => j.id === editingJobId) || {}) : {};
+  // 給与形態を切り替えても、もう一方の入力（時給⇔月給、いつものシフト時間）はすぐには消さず保持する
+  // （後で元の形態に戻したときに、入力し直さなくて済むようにするため）
+  const hourlyWage = payType === 'hourly' ? wage : (existing.hourlyWage ?? null);
+  const monthlySalaryValue = payType === 'monthly' ? monthlySalary : (existing.monthlySalary ?? null);
+  const defaultStart = payType === 'hourly' ? (defaultStartInput.value || null) : (existing.defaultStart ?? null);
+  const defaultEnd = payType === 'hourly' ? (defaultEndInput.value || null) : (existing.defaultEnd ?? null);
+  const defaultBreakMin = payType === 'hourly'
+    ? (defaultBreakInput.value !== '' ? Number(defaultBreakInput.value) : null)
+    : (existing.defaultBreakMin ?? null);
   if (editingJobId) {
-    const existing = state.jobsCache.find(j => j.id === editingJobId) || {};
-    await Store.putJob({ ...existing, id: editingJobId, name, hourlyWage: wage, color: selectedJobColor, allowances, defaultStart, defaultEnd, defaultBreakMin });
+    await Store.putJob({ ...existing, id: editingJobId, name, payType, hourlyWage, monthlySalary: monthlySalaryValue, color: selectedJobColor, allowances, defaultStart, defaultEnd, defaultBreakMin });
     resetJobForm();
     await renderJobList();
     await renderCalendar();
-    toast('バイト先を更新しました');
+    toast('勤務先を更新しました');
   } else {
-    await Store.addJob({ name, hourlyWage: wage, color: selectedJobColor, allowances, defaultStart, defaultEnd, defaultBreakMin, createdAt: Date.now() });
+    await Store.addJob({ name, payType, hourlyWage, monthlySalary: monthlySalaryValue, color: selectedJobColor, allowances, defaultStart, defaultEnd, defaultBreakMin, createdAt: Date.now() });
     resetJobForm();
     await renderJobList();
     await renderCalendar();
-    toast('バイト先を追加しました');
+    toast('勤務先を追加しました');
   }
 });
 
@@ -2250,10 +2402,13 @@ async function buildFeedCard(entry, meds) {
   }
 
   let shiftsHtml = '';
-  if (entry.shifts && entry.shifts.length) {
-    shiftsHtml = '<div class="feed-shifts">' + entry.shifts.map(s =>
-      `<span class="badge badge-shift" style="border-color:${s.color}"><span class="job-color-dot" style="background:${s.color}"></span>&nbsp;${escapeHtml(s.jobName)} ${s.start}〜${s.end}（${s.hours.toFixed(1)}h／${yen(s.pay)}）</span>`
-    ).join('') + '</div>';
+  if (state.workEnabled && entry.shifts && entry.shifts.length) {
+    shiftsHtml = '<div class="feed-shifts">' + entry.shifts.map(s => {
+      const label = s.payType === 'monthly'
+        ? `${escapeHtml(s.jobName)} 出勤`
+        : `${escapeHtml(s.jobName)} ${s.start}〜${s.end}（${s.hours.toFixed(1)}h／${yen(s.pay)}）`;
+      return `<span class="badge badge-shift" style="border-color:${s.color}"><span class="job-color-dot" style="background:${s.color}"></span>&nbsp;${label}</span>`;
+    }).join('') + '</div>';
   }
 
   card.innerHTML = `
@@ -2304,12 +2459,12 @@ document.getElementById('btn-export').addEventListener('click', async () => {
   if (typeof JSZip === 'undefined') { toast('バックアップ機能の読み込みに失敗しました（通信環境をご確認ください）'); return; }
   toast('準備中...');
   try {
-    const [jobs, entries, media, medications, settings] = await Promise.all([
-      Store.getAllJobs(), Store.getAllEntries(), Store.getAllMedia(), Store.getAllMedications(), Store.getSettings()
+    const [jobs, entries, media, medications, settings, features] = await Promise.all([
+      Store.getAllJobs(), Store.getAllEntries(), Store.getAllMedia(), Store.getAllMedications(), Store.getSettings(), Store.getFeatureSettings()
     ]);
     const zip = new JSZip();
     const mediaMeta = media.map(m => ({ id: m.id, date: m.date, type: m.type, mime: m.mime, name: m.name, createdAt: m.createdAt, caption: m.caption || '', noteId: m.noteId || null }));
-    const dataJson = { version: 3, exportedAt: new Date().toISOString(), jobs, entries, mediaMeta, medications, settings };
+    const dataJson = { version: 4, exportedAt: new Date().toISOString(), jobs, entries, mediaMeta, medications, settings, features };
     zip.file('data.json', JSON.stringify(dataJson, null, 2));
     const mediaFolder = zip.folder('media');
     media.forEach(m => {
@@ -2352,11 +2507,15 @@ document.getElementById('import-input').addEventListener('change', async (e) => 
     for (const job of (dataJson.jobs || [])) await Store.putJob(job);
     for (const entry of (dataJson.entries || [])) await Store.putEntry(entry);
     for (const med of (dataJson.medications || [])) await Store.putMedication(med);
-    // settingsが無い（テーマ機能追加より前に作られた）バックアップをインポートしても、
-    // 現在選んでいるテーマ設定はそのまま保持する（上書きしない）
+    // settings/featuresが無い（各機能の追加より前に作られた）バックアップをインポートしても、
+    // 現在選んでいるテーマ・表示設定はそのまま保持する（上書きしない）
     if (dataJson.settings) {
       await Store.putSettings(dataJson.settings);
       applyTheme(dataJson.settings);
+    }
+    if (dataJson.features) {
+      await Store.putFeatureSettings(dataJson.features);
+      applyWorkVisibility(dataJson.features);
     }
     for (const meta of (dataJson.mediaMeta || [])) {
       const ext = (meta.name && meta.name.includes('.')) ? meta.name.split('.').pop() : (meta.type === 'video' ? 'mp4' : 'jpg');
@@ -2387,6 +2546,7 @@ async function init() {
   populateYearMonthSelects();
   await getDB();
   await initTheme();
+  await initFeatures();
   await refreshJobsCache();
   await renderCalendar();
   await renderMedStockAlert();
