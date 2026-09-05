@@ -22,7 +22,7 @@
   :root {
     /* 紙のような温かみのあるニュートラル + 落ち着いたティール系アクセント */
     --bg:#f4f7f6; --bg-elevated:#ffffff; --text:#20302c; --text-muted:#66756f;
-    --border:#dfe8e5; --primary:#2f7a6f; --primary-dark:#215a52;
+    --border:#dfe8e5; --primary:#2f7a6f; --primary-dark:#215a52; --primary-fg:#ffffff;
     --danger:#b5514a; --danger-bg:rgba(181,81,74,.12);
     --med-taken:#4f9563; --med-taken-bg:rgba(79,149,99,.15);
     --med-skipped:#93a29b; --med-skipped-bg:rgba(147,162,155,.2);
@@ -67,7 +67,7 @@
 
   .mode-tabs { display:flex; gap:6px; margin:4px 4px 16px; background:var(--bg-elevated); padding:4px; border-radius:999px; border:1px solid var(--border); }
   .mode-tab { flex:1; padding:10px 12px; border:none; background:transparent; border-radius:999px; font-size:14px; font-weight:600; color:var(--text-muted); cursor:pointer; }
-  .mode-tab.active { background: var(--primary); color:#fff; }
+  .mode-tab.active { background: var(--primary); color:var(--primary-fg); }
 
   .mode-panel { display:none; }
   .mode-panel.active { display:block; }
@@ -170,7 +170,7 @@
   .shift-form input[type="time"] { width:auto; flex:1; min-width:90px; }
   .break-label { display:flex; align-items:center; gap:4px; font-size:12px; color:var(--text-muted); white-space:nowrap; }
   .break-label input { width:56px; }
-  .add-shift-btn, .primary-btn { background: var(--primary); color:#fff; border:none; border-radius:var(--radius-sm); padding:10px 16px; font-size:13px; font-weight:600; cursor:pointer; }
+  .add-shift-btn, .primary-btn { background: var(--primary); color:var(--primary-fg); border:none; border-radius:var(--radius-sm); padding:10px 16px; font-size:13px; font-weight:600; cursor:pointer; }
   .add-shift-btn:hover, .primary-btn:hover { background: var(--primary-dark); }
   .hint-text { font-size:12px; color: var(--text-muted); }
   .danger-btn { background:transparent; border:1px solid var(--danger); color:var(--danger); border-radius:var(--radius-sm); padding:10px 16px; font-size:13px; cursor:pointer; }
@@ -179,6 +179,18 @@
   .settings-section { display:flex; flex-direction:column; gap:10px; }
   .settings-section-title { font-size:14px; margin:0; font-family: var(--font-display); font-weight:700; }
   .settings-divider { width:100%; border:none; border-top:1px solid var(--border); margin:4px 0; }
+
+  .theme-swatches { display:flex; flex-wrap:wrap; gap:10px; }
+  .theme-swatch { width:34px; height:34px; border-radius:50%; border:none; cursor:pointer; padding:0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); opacity:.55; transition:opacity .15s ease, transform .15s ease; }
+  .theme-swatch:hover { opacity:.85; }
+  .theme-swatch.selected { opacity:1; transform:scale(1.1); box-shadow: inset 0 0 0 1px rgba(0,0,0,.15), 0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--text); }
+  .theme-custom-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .theme-custom-row label { font-size:13px; color:var(--text-muted); }
+  .theme-custom-row input[type="color"] { width:44px; height:32px; border:1px solid var(--border); border-radius:var(--radius-sm); background:transparent; cursor:pointer; padding:2px; }
+  .theme-appearance-row { display:flex; gap:6px; background:var(--bg); padding:4px; border-radius:999px; border:1px solid var(--border); }
+  .theme-appearance-btn { flex:1; padding:8px 10px; border:none; background:transparent; border-radius:999px; font-size:13px; font-weight:600; color:var(--text-muted); cursor:pointer; }
+  .theme-appearance-btn.active { background: var(--primary); color:var(--primary-fg); }
+  .theme-reset-btn { align-self:flex-start; border:none; background:transparent; color:var(--text-muted); font-size:12px; text-decoration:underline; cursor:pointer; padding:0; }
 
   .job-color-dot { width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0; }
   .job-list { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
@@ -428,6 +440,24 @@
     </div>
     <div class="modal-body">
       <section class="settings-section">
+        <h3 class="settings-section-title">🎨 テーマ</h3>
+        <p class="hint-text">サイト全体のアクセントカラーと、ライト/ダーク表示を好みに合わせて変更できます。服薬・危険・シフトなどの色分けはわかりやすさのためそのまま変わりません。</p>
+        <div id="theme-swatches" class="theme-swatches"></div>
+        <div class="theme-custom-row">
+          <label for="theme-custom-color">カスタムカラー</label>
+          <input type="color" id="theme-custom-color" value="#2f7a6f">
+        </div>
+        <div id="theme-appearance-row" class="theme-appearance-row">
+          <button type="button" class="theme-appearance-btn" data-mode="system">端末に合わせる</button>
+          <button type="button" class="theme-appearance-btn" data-mode="light">ライト</button>
+          <button type="button" class="theme-appearance-btn" data-mode="dark">ダーク</button>
+        </div>
+        <button id="btn-theme-reset" class="theme-reset-btn" type="button">初期設定に戻す</button>
+      </section>
+
+      <hr class="settings-divider">
+
+      <section class="settings-section">
         <h3 class="settings-section-title">薬の在庫</h3>
         <p class="hint-text">基準日時点の残量と1日の服用数を登録すると、カレンダーで「服薬した」と記録した日の分だけ自動で減算され、なくなる目安の日付を計算します。残量を書き換えると、今日を基準日として計算し直されます。各薬に「飲むタイミング」（朝・夜など）を設定すると、記録モードでタイミングごとにチェックでき、どの時間帯を飲み忘れやすいかもここで確認できます。</p>
         <div id="med-stock-list" class="med-stock-list"></div>
@@ -563,6 +593,125 @@ function yen(n) { return '¥' + Math.round(n || 0).toLocaleString('ja-JP'); }
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+/* =========================================================
+   テーマ（アクセントカラー・ライト/ダーク）
+   ユーザーが選んだ1色から、ボタン背景等に使う--primary、文字色として使う濃淡調整済みの
+   --primary-dark（ライトモードは濃く・ダークモードは薄く）、背景として使った時に読みやすい
+   文字色--primary-fgを自動計算する。個別の色（服薬・危険・シフト等の意味を持つ色）はそのまま。
+   ========================================================= */
+const DEFAULT_ACCENT = '#2f7a6f';
+const THEME_SWATCHES = ['#2f7a6f', '#3568b0', '#6b5ca5', '#b8567e', '#a8623c', '#2e6b3e', '#4a5568', '#8a7a1f'];
+
+function hexToRgb(hex) {
+  const m = String(hex).replace('#', '');
+  return { r: parseInt(m.substring(0, 2), 16), g: parseInt(m.substring(2, 4), 16), b: parseInt(m.substring(4, 6), 16) };
+}
+function rgbToHex({ r, g, b }) {
+  const c = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+  return `#${c(r)}${c(g)}${c(b)}`;
+}
+function mixHex(hexA, hexB, amount) {
+  const a = hexToRgb(hexA), b = hexToRgb(hexB);
+  return rgbToHex({ r: a.r + (b.r - a.r) * amount, g: a.g + (b.g - a.g) * amount, b: a.b + (b.b - a.b) * amount });
+}
+function relativeLuminance(hex) {
+  const { r, g, b } = hexToRgb(hex);
+  const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+function contrastRatio(hexA, hexB) {
+  const l1 = relativeLuminance(hexA), l2 = relativeLuminance(hexB);
+  const lighter = Math.max(l1, l2), darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+// 選んだ色を背景にした時、白文字と濃い文字のどちらが読みやすいかをコントラスト比で判定する
+// （明るすぎる色を選んでも、ボタンの文字が見えなくならないようにするため）
+function bestFgFor(hex) {
+  return contrastRatio(hex, '#ffffff') >= contrastRatio(hex, '#20302c') ? '#ffffff' : '#20302c';
+}
+function isValidHexColor(hex) {
+  return /^#[0-9a-fA-F]{6}$/.test(hex);
+}
+function applyTheme(settings) {
+  const accent = isValidHexColor(settings && settings.accentColor) ? settings.accentColor : DEFAULT_ACCENT;
+  const darkForLight = mixHex(accent, '#000000', 0.28); // ライトモードで文字として使う濃い方
+  const lightForDark = mixHex(accent, '#ffffff', 0.45); // ダークモードで文字として使う薄い方
+  const fg = bestFgFor(accent);
+  let styleEl = document.getElementById('theme-vars');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'theme-vars';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = `
+    :root { --primary:${accent}; --primary-dark:${darkForLight}; --primary-fg:${fg}; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) { --primary-dark:${lightForDark}; }
+    }
+    :root[data-theme="dark"] { --primary-dark:${lightForDark}; }
+  `;
+  const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeColorMeta) themeColorMeta.setAttribute('content', accent);
+  if (settings && (settings.mode === 'light' || settings.mode === 'dark')) {
+    document.documentElement.dataset.theme = settings.mode;
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
+}
+async function initTheme() {
+  const settings = await Store.getSettings();
+  applyTheme(settings);
+  return settings;
+}
+// 設定モーダルのプレビュー用に、最後にrenderThemeSection()で読み込んだ設定を覚えておく
+// （カスタムカラーのinputイベントのたびにDBへ読みに行かなくて済むようにするため）
+let currentThemeSettings = { accentColor: DEFAULT_ACCENT, mode: 'system' };
+async function updateThemeSettings(patch) {
+  const current = await Store.getSettings();
+  const next = {
+    accentColor: isValidHexColor(current.accentColor) ? current.accentColor : DEFAULT_ACCENT,
+    mode: current.mode || 'system',
+    ...patch,
+  };
+  await Store.putSettings(next);
+  applyTheme(next);
+  await renderThemeSection();
+}
+async function renderThemeSection() {
+  const settings = await Store.getSettings();
+  const accent = isValidHexColor(settings.accentColor) ? settings.accentColor : DEFAULT_ACCENT;
+  const mode = settings.mode || 'system';
+  currentThemeSettings = { accentColor: accent, mode };
+  const swatchesEl = document.getElementById('theme-swatches');
+  swatchesEl.innerHTML = THEME_SWATCHES.map(hex => {
+    const selected = hex.toLowerCase() === accent.toLowerCase();
+    return `<button type="button" class="theme-swatch${selected ? ' selected' : ''}" data-color="${hex}" style="background:${hex}" aria-label="テーマカラーを${hex}にする"></button>`;
+  }).join('');
+  swatchesEl.querySelectorAll('.theme-swatch').forEach(btn => {
+    btn.addEventListener('click', () => updateThemeSettings({ accentColor: btn.dataset.color }));
+  });
+  document.getElementById('theme-custom-color').value = accent;
+  document.querySelectorAll('.theme-appearance-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === mode);
+  });
+}
+document.getElementById('theme-custom-color').addEventListener('input', (e) => {
+  // ドラッグ中はプレビューだけ即時反映し、DBへの保存はchangeイベント（確定時）にまとめる
+  if (!isValidHexColor(e.target.value)) return;
+  applyTheme({ accentColor: e.target.value, mode: currentThemeSettings.mode });
+});
+document.getElementById('theme-custom-color').addEventListener('change', async (e) => {
+  if (!isValidHexColor(e.target.value)) return;
+  await updateThemeSettings({ accentColor: e.target.value });
+});
+document.querySelectorAll('.theme-appearance-btn').forEach(btn => {
+  btn.addEventListener('click', () => updateThemeSettings({ mode: btn.dataset.mode }));
+});
+document.getElementById('btn-theme-reset').addEventListener('click', async () => {
+  await updateThemeSettings({ accentColor: DEFAULT_ACCENT, mode: 'system' });
+  toast('テーマを初期設定に戻しました');
+});
 let toastTimer = null;
 function toast(msg) {
   const el = document.getElementById('toast');
@@ -596,9 +745,10 @@ function computeShiftHours(startStr, endStr, breakMin) {
               defaultStart, defaultEnd, defaultBreakMin（いつものシフト時間・任意）, createdAt }
    medications: { id(PK,auto), name, unit, dailyDose, stockQuantity, stockDate, createdAt,
                   timings[{id,label}]（飲むタイミング。朝・夜など。未設定なら従来通り1日1回のチェックのみ）}
+   settings: { key(PK) 'appearance', accentColor, mode:'system'|'light'|'dark' }（サイト全体のテーマ設定）
    ========================================================= */
 const DB_NAME = 'kirokuCalendarDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let dbInstance = null;
 
 function openDB() {
@@ -618,6 +768,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains('medications')) {
         db.createObjectStore('medications', { keyPath: 'id', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains('settings')) {
+        db.createObjectStore('settings', { keyPath: 'key' });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
@@ -786,6 +939,20 @@ const Store = {
     t.objectStore('media').clear();
     t.objectStore('jobs').clear();
     t.objectStore('medications').clear();
+    return txDone(t);
+  },
+  // テーマ設定（アクセントカラー・ライト/ダーク）。バックアップ復元時に古いデータを上書きしても
+  // 個人の色の好みが消えてしまわないよう、clearAll()の対象には含めていない。
+  async getSettings() {
+    const db = await getDB();
+    const t = db.transaction('settings', 'readonly');
+    const rec = await reqToPromise(t.objectStore('settings').get('appearance'));
+    return rec || { key: 'appearance', accentColor: DEFAULT_ACCENT, mode: 'system' };
+  },
+  async putSettings(settings) {
+    const db = await getDB();
+    const t = db.transaction('settings', 'readwrite');
+    t.objectStore('settings').put({ key: 'appearance', accentColor: settings.accentColor, mode: settings.mode });
     return txDone(t);
   }
 };
@@ -1777,6 +1944,7 @@ document.getElementById('btn-add-med').addEventListener('click', async () => {
 
 /* ---- バイト設定モーダル ---- */
 document.getElementById('btn-settings').addEventListener('click', async () => {
+  await renderThemeSection();
   await renderJobList();
   renderColorPicker();
   await renderMedStockList();
@@ -2136,12 +2304,12 @@ document.getElementById('btn-export').addEventListener('click', async () => {
   if (typeof JSZip === 'undefined') { toast('バックアップ機能の読み込みに失敗しました（通信環境をご確認ください）'); return; }
   toast('準備中...');
   try {
-    const [jobs, entries, media, medications] = await Promise.all([
-      Store.getAllJobs(), Store.getAllEntries(), Store.getAllMedia(), Store.getAllMedications()
+    const [jobs, entries, media, medications, settings] = await Promise.all([
+      Store.getAllJobs(), Store.getAllEntries(), Store.getAllMedia(), Store.getAllMedications(), Store.getSettings()
     ]);
     const zip = new JSZip();
     const mediaMeta = media.map(m => ({ id: m.id, date: m.date, type: m.type, mime: m.mime, name: m.name, createdAt: m.createdAt, caption: m.caption || '', noteId: m.noteId || null }));
-    const dataJson = { version: 2, exportedAt: new Date().toISOString(), jobs, entries, mediaMeta, medications };
+    const dataJson = { version: 3, exportedAt: new Date().toISOString(), jobs, entries, mediaMeta, medications, settings };
     zip.file('data.json', JSON.stringify(dataJson, null, 2));
     const mediaFolder = zip.folder('media');
     media.forEach(m => {
@@ -2184,6 +2352,12 @@ document.getElementById('import-input').addEventListener('change', async (e) => 
     for (const job of (dataJson.jobs || [])) await Store.putJob(job);
     for (const entry of (dataJson.entries || [])) await Store.putEntry(entry);
     for (const med of (dataJson.medications || [])) await Store.putMedication(med);
+    // settingsが無い（テーマ機能追加より前に作られた）バックアップをインポートしても、
+    // 現在選んでいるテーマ設定はそのまま保持する（上書きしない）
+    if (dataJson.settings) {
+      await Store.putSettings(dataJson.settings);
+      applyTheme(dataJson.settings);
+    }
     for (const meta of (dataJson.mediaMeta || [])) {
       const ext = (meta.name && meta.name.includes('.')) ? meta.name.split('.').pop() : (meta.type === 'video' ? 'mp4' : 'jpg');
       const zf = zip.file(`media/${meta.id}.${ext}`);
@@ -2212,6 +2386,7 @@ document.getElementById('import-input').addEventListener('change', async (e) => 
 async function init() {
   populateYearMonthSelects();
   await getDB();
+  await initTheme();
   await refreshJobsCache();
   await renderCalendar();
   await renderMedStockAlert();
