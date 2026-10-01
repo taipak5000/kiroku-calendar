@@ -259,6 +259,15 @@
   .med-stock-eta { font-size:12.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .med-stock-eta.low { color: var(--shift-color); font-weight:600; }
   .med-stock-eta.empty { color: var(--danger); font-weight:600; }
+  .med-refill-details summary { font-size:12px; color:var(--text-muted); cursor:pointer; padding:6px 2px 0; list-style:none; }
+  .med-refill-details summary::-webkit-details-marker { display:none; }
+  .med-refill-details summary::before { content:'▸ '; }
+  .med-refill-details[open] summary::before { content:'▾ '; }
+  .med-refill-row { margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); display:flex; flex-direction:column; gap:8px; }
+  .med-refill-hint { font-size:12px; color:var(--text-muted); }
+  .med-refill-input-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  .med-refill-input-row input[type="number"] { width:72px; padding:6px 8px; font-size:13px; }
+  .med-refill-confirm { padding:7px 14px; font-size:12.5px; }
   .med-stock-details summary { font-size:12px; color:var(--text-muted); cursor:pointer; padding:6px 2px 0; list-style:none; }
   .med-stock-details summary::-webkit-details-marker { display:none; }
   .med-stock-details summary::before { content:'▸ '; }
@@ -1910,6 +1919,16 @@ async function renderMedStockList() {
         </div>
         <div class="med-stock-eta ${etaClass}">${etaText}</div>
         ${renderMedTimingStatsHtml(timingStats)}
+        <details class="med-refill-details" data-open-key="${med.id}-refill">
+          <summary>＋ 補充する</summary>
+          <div class="med-refill-row">
+            <span class="med-refill-hint">現在の残量（${currentStock}${unit}）に、新しくもらった分を追加します</span>
+            <div class="med-refill-input-row">
+              <input type="number" class="med-refill-input" data-id="${med.id}" placeholder="例：30" min="0" step="1"><span>${unit}</span>
+              <button type="button" class="med-refill-confirm primary-btn" data-id="${med.id}">追加する</button>
+            </div>
+          </div>
+        </details>
         <details class="med-stock-details" data-open-key="${med.id}-stock">
           <summary>基準値を修正する</summary>
           <div class="med-stock-row-controls">
@@ -1964,6 +1983,27 @@ async function renderMedStockList() {
       await renderMedStockAlert();
       toast('残量を更新しました');
     });
+  });
+  list.querySelectorAll('.med-refill-confirm').forEach(btn => {
+    const row = btn.closest('.med-refill-row');
+    const input = row.querySelector('.med-refill-input');
+    const submitRefill = async () => {
+      const addAmount = Number(input.value);
+      if (!(addAmount > 0)) { toast('補充する数を正しく入力してください'); return; }
+      const id = Number(btn.dataset.id);
+      const med = (await Store.getAllMedications()).find(m => m.id === id);
+      if (!med) return;
+      const { currentStock } = await computeMedStock(med); // 表示中の値ではなく、今この瞬間の計算結果を使う
+      const unit = med.unit || '錠';
+      med.stockQuantity = Math.round((currentStock + addAmount) * 10) / 10; // 既存の残量に追加するだけ。他の項目（タイミング等）は一切変更しない
+      med.stockDate = todayKey(); // 補充した今日を新しい基準日として再計算する
+      await Store.putMedication(med);
+      await renderMedStockList();
+      await renderMedStockAlert();
+      toast(`${addAmount}${unit}補充しました（現在の残量：${med.stockQuantity}${unit}）`);
+    };
+    btn.addEventListener('click', submitRefill);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submitRefill(); } });
   });
   list.querySelectorAll('.med-dose-edit').forEach(input => {
     input.addEventListener('change', async () => {
